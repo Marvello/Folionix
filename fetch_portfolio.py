@@ -424,6 +424,35 @@ def extract_recommendation(text: str) -> str:
 # ──────────────────────────────────────────────
 # STEP 5 — SEND TO TELEGRAM
 # ──────────────────────────────────────────────
+def send_telegram_request(text: str, chat_id: str, max_retries: int = 3) -> bool:
+    """Send a single Telegram message with retry. Returns True on success."""
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={
+                    "chat_id": chat_id, "text": text,
+                    "parse_mode": "HTML", "disable_web_page_preview": True,
+                },
+                timeout=15,
+            )
+            if resp.status_code == 200:
+                print(f"  ✉️  Telegram sent ({len(text)} chars)")
+                return True
+            if resp.status_code == 429:  # rate limited
+                wait = min(2 ** attempt, 10)
+                time.sleep(wait)
+                continue
+            print(f"  ⚠️  Telegram error {resp.status_code}: {resp.text[:200]}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+        except Exception as e:
+            print(f"  ⚠️  Telegram exception: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+    return False
+
+
 def send_telegram(text: str, chat_id: str = TELEGRAM_CHAT_ID):
     if not SEND_TELEGRAM:
         print("  📵 Telegram disabled — printing instead:\n")
@@ -453,26 +482,9 @@ def send_telegram(text: str, chat_id: str = TELEGRAM_CHAT_ID):
     total = len(chunks)
     for i, chunk in enumerate(chunks):
         msg = chunk if total == 1 else f"{chunk}\n\n<i>({i+1}/{total})</i>"
-        try:
-            resp = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
-                json={
-                    "chat_id":                chat_id,
-                    "text":                   msg,
-                    "parse_mode":             "HTML",
-                    "disable_web_page_preview": True,
-                },
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                print(f"  ✉️  Telegram sent ({len(msg)} chars)")
-            else:
-                print(f"  ⚠️  Telegram error {resp.status_code}: {resp.text[:200]}")
-        except Exception as e:
-            print(f"  ⚠️  Telegram exception: {e}")
-
+        send_telegram_request(msg, chat_id)
         if i < total - 1:
-            time.sleep(0.5)  # avoid Telegram flood limit
+            time.sleep(0.5)
 
 
 # ──────────────────────────────────────────────
