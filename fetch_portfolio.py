@@ -279,7 +279,7 @@ Konteks: {d['notes']}
 
 HARGA:
 - Sekarang : {fmt_idr(d['current_price'])} ({d['day_arrow']} {sign(d['day_change_pct'])}{d['day_change_pct']}%)
-- Volume   : {d['volume']:,} lot
+- Volume   : {f"{d['volume']:,}" if d.get('volume') else "N/A"} lot
 - 52W High : {fmt_idr(d['high_52w'])} | 52W Low: {fmt_idr(d['low_52w'])}
 {pnl_block}
 

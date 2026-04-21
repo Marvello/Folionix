@@ -1,0 +1,18 @@
+# IDX Portfolio scheduled fetch
+# Runs during IDX trading hours (WIB = UTC+7)
+# Market hours: 09:00-12:00 (Session 1), 13:30-15:00 (Session 2)
+
+# Session 1: every hour at :05
+05 09 * * 1-5 python /app/fetch_portfolio.py
+05 10 * * 1-5 python /app/fetch_portfolio.py
+05 11 * * 1-5 python /app/fetch_portfolio.py
+
+# Session 1 close
+05 12 * * 1-5 python /app/fetch_portfolio.py
+
+# Session 2: every hour at :35
+35 13 * * 1-5 python /app/fetch_portfolio.py
+35 14 * * 1-5 python /app/fetch_portfolio.py
+
+# Market close
+05 15 * * 1-5 python /app/fetch_portfolio.py
