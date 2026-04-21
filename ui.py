@@ -4,7 +4,7 @@ ui.py — Streamlit dashboard for IDX Portfolio Analyzer
 Run: streamlit run ui.py --server.port 8501
 """
 
-import os, sys, json, re
+import os, sys, json
 from datetime import datetime
 import streamlit as st
 import pandas as pd
@@ -13,13 +13,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, get_all_positions, upsert_position, deactivate_position,
                 get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
                 get_snapshots, get_analyses, sync_portfolio_json)
-from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB
+from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
-
-def sanitize_html(html: str) -> str:
-    """Strip all HTML tags except b, i, code."""
-    return re.sub(r"<(?!\/?(?:b|i|code)(?:\s[^>]*)?>)[^>]+>", "", html)
 
 init_db()
 

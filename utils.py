@@ -1,5 +1,6 @@
 """Shared helpers for IDX Portfolio Analyzer."""
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -82,3 +83,8 @@ def to_wib(dt: datetime) -> datetime:
 def fmt_wib(dt: datetime) -> str:
     """Format a datetime as WIB display string."""
     return to_wib(dt).strftime("%d %b %Y %H:%M WIB")
+
+
+def sanitize_html(html: str) -> str:
+    """Strip all HTML tags except b, i, code."""
+    return re.sub(r"<(?!\/?(?:b|i|code)(?:\s[^>]*)?>)[^>]+>", "", html)
