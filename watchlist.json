@@ -1,0 +1,11 @@
+{
+  "_comment": "Watchlist — mutually exclusive with portfolio.json. user = manually added. ai_suggested = AI-recommended based on portfolio context.",
+  "user": [
+    {
+      "ticker": "TLKM",
+      "added_at": "2026-04-22",
+      "notes": "Telkom, defensive telco blue chip"
+    }
+  ],
+  "ai_suggested": []
+}

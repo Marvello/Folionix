@@ -42,7 +42,7 @@ if UI_PASSWORD:
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 IDX Portfolio")
 st.sidebar.caption(f"[v {get_version()}]({get_version_url()})")
-page = st.sidebar.radio("Navigation", ["Dashboard", "Positions", "History", "Analysis Log", "Accuracy"])
+page = st.sidebar.radio("Navigation", ["Dashboard", "Watchlist", "Positions", "History", "Analysis Log", "Accuracy"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def ts_wib(dt):
@@ -139,6 +139,130 @@ if page == "Dashboard":
         st.subheader("Total P&L per Saham")
         chart_df = df[["Ticker", "Total P&L"]].set_index("Ticker")
         st.bar_chart(chart_df)
+
+
+# ── PAGE: Watchlist ──────────────────────────────────────────────────────────
+elif page == "Watchlist":
+    st.title("👀 Watchlist")
+
+    # Load watchlist.json
+    import json as _json
+    from pathlib import Path as _Path
+
+    _wl_path = _Path(os.getenv("WATCHLIST_FILE", "/app/watchlist.json"))
+    if not _wl_path.exists():
+        # Try local path
+        _wl_path = _Path(os.path.dirname(os.path.abspath(__file__))) / "watchlist.json"
+
+    if not _wl_path.exists():
+        st.info("Belum ada watchlist. Buat watchlist.json terlebih dahulu.")
+        st.stop()
+
+    wl_data = _json.loads(_wl_path.read_text())
+    user_wl = wl_data.get("user", [])
+    ai_wl = wl_data.get("ai_suggested", [])
+    all_wl = user_wl + ai_wl
+
+    if not all_wl:
+        st.info("Watchlist kosong.")
+        st.stop()
+
+    # Build watchlist table with latest snapshot + analysis data
+    wl_rows = []
+    for entry in all_wl:
+        ticker = entry["ticker"].upper()
+        source = "AI" if entry in ai_wl else "User"
+        notes = entry.get("rationale", entry.get("notes", ""))
+        added = entry.get("added_at", "—")
+
+        snap = get_latest_snapshot(ticker)
+        analysis = get_latest_analysis(ticker)
+
+        price = snap.get("current_price") if snap else None
+        day_pct = snap.get("day_change_pct") if snap else None
+        pe = snap.get("pe") if snap else None
+        pb = snap.get("pb") if snap else None
+        high52 = snap.get("high_52w") if snap else None
+        low52 = snap.get("low_52w") if snap else None
+
+        rec = (analysis.get("recommendation") or "—") if analysis else "—"
+        last_update = ts_wib(snap.get("fetched_at")) if snap else "—"
+
+        # Verdict emoji
+        verdict_map = {"BUY SEKARANG": "🟢", "TUNGGU": "🟡", "HINDARI": "🔴"}
+        verdict_icon = verdict_map.get(rec, "")
+
+        wl_rows.append({
+            "Ticker": ticker,
+            "Source": f"{'👤' if source == 'User' else '🤖'} {source}",
+            "Harga": price,
+            "Day %": day_pct,
+            "P/E": pe,
+            "P/B": pb,
+            "52W High": high52,
+            "52W Low": low52,
+            "Verdict": f"{verdict_icon} {rec}" if rec != "—" else "—",
+            "Notes": notes[:50] if notes else "—",
+            "Update": last_update,
+        })
+
+    # Summary
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total Watchlist", len(all_wl))
+    col2.metric("User Added", len(user_wl))
+    col3.metric("AI Suggested", len(ai_wl))
+
+    st.divider()
+
+    # Table
+    df_wl = pd.DataFrame(wl_rows)
+    if not df_wl.empty:
+        def color_verdict(val):
+            if "BUY" in str(val):
+                return "color: #22c55e"
+            if "HINDARI" in str(val):
+                return "color: #ef4444"
+            if "TUNGGU" in str(val):
+                return "color: #eab308"
+            return ""
+
+        def color_day_pct(val):
+            if val is None or val == 0:
+                return ""
+            return "color: #22c55e" if val > 0 else "color: #ef4444"
+
+        idr_cols_wl = ["Harga", "52W High", "52W Low"]
+
+        styled_wl = (
+            df_wl.style
+            .format({
+                "Harga": lambda x: fmt_idr(x) if x else "—",
+                "Day %": lambda x: f"{x:+.2f}%" if x else "—",
+                "P/E": lambda x: f"{x:.1f}x" if x else "—",
+                "P/B": lambda x: f"{x:.2f}x" if x else "—",
+                "52W High": lambda x: fmt_idr(x) if x else "—",
+                "52W Low": lambda x: fmt_idr(x) if x else "—",
+            })
+            .map(color_verdict, subset=["Verdict"])
+            .map(color_day_pct, subset=["Day %"])
+            .set_properties(subset=idr_cols_wl, **{"text-align": "right"})
+            .set_properties(subset=["Day %", "P/E", "P/B"], **{"text-align": "right"})
+        )
+
+        st.dataframe(styled_wl, use_container_width=True, hide_index=True)
+
+    # Show latest analysis for each ticker
+    st.divider()
+    st.subheader("Latest Analysis")
+
+    for entry in all_wl:
+        ticker = entry["ticker"].upper()
+        analysis = get_latest_analysis(ticker)
+        if analysis and analysis.get("clean_html"):
+            rec = analysis.get("recommendation") or "—"
+            ts = ts_wib(analysis.get("analysed_at"))
+            with st.expander(f"**{ticker}** | {rec} | {ts}"):
+                st.markdown(sanitize_html(analysis.get("clean_html", "")), unsafe_allow_html=True)
 
 
 # ── PAGE: Positions (CRUD) ────────────────────────────────────────────────────

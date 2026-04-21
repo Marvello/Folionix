@@ -10,6 +10,7 @@ services:
       - TZ=Asia/Jakarta
     volumes:
       - ./portfolio.json:/app/portfolio.json
+      - ./watchlist.json:/app/watchlist.json
       - ./data:/app/data
     extra_hosts:
       - "debian-tower:host-gateway"
@@ -46,6 +47,7 @@ services:
       - TZ=Asia/Jakarta
     volumes:
       - ./portfolio.json:/app/portfolio.json
+      - ./watchlist.json:/app/watchlist.json
       - ./data:/app/data
     ports:
       - "8501:8501"

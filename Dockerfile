@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY fetch_portfolio.py db.py bot.py ui.py utils.py crontab ./
+COPY fetch_portfolio.py db.py bot.py ui.py utils.py crontab \
+     analyze_watchlist.py watchlist_manager.py ./
 
 ARG GIT_COMMIT=unknown
 ENV GIT_COMMIT=${GIT_COMMIT}
