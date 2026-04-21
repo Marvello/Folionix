@@ -20,6 +20,7 @@ import os
 import time
 import random
 import argparse
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -31,6 +32,9 @@ from utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
                    WIB, now_wib, fmt_wib)
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+log = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────
 # CONFIG — edit .env to change these
@@ -76,7 +80,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
     Uses fast_info first (lighter), then info with up to 3 retries.
     """
     symbol = normalize_ticker(ticker)
-    print(f"  📡 Fetching {symbol}...", end=" ", flush=True)
+    log.info(f"📡 Fetching {symbol}...")
 
     # ── Cache check ──
     cached = get_latest_snapshot(ticker)
@@ -86,7 +90,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
             fetched = fetched.replace(tzinfo=timezone.utc)
         age = (datetime.now(timezone.utc) - fetched).total_seconds() / 60
         if age < CACHE_MINUTES:
-            print(f"✓ (cached {age:.0f}m ago)")
+            log.info(f"✓ Using cached data ({age:.0f}m ago)")
             # Always re-read lots + avg_price from portfolio.json (not from snapshot)
             # so changes to portfolio.json take effect immediately without cache bust
             current_price   = cached.get("current_price")
@@ -127,11 +131,10 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
             is_rate_limit = any(x in err_str for x in ["429", "Too Many Requests", "Rate limited"])
             if is_rate_limit and attempt < MAX_RETRIES - 1:
                 wait = 5 * (2 ** attempt)   # 5s → 10s → 20s
-                print(f"\n  ⏳ Rate limited. Waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})...",
-                      end=" ", flush=True)
+                log.warning(f"⏳ Rate limited. Waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})...")
                 time.sleep(wait)
             else:
-                print(f"ERROR: {e}")
+                log.error(f"Failed to fetch {ticker}: {e}")
                 return {"ticker": ticker, "error": str(e)}
 
     # ── Price ──
@@ -179,7 +182,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
     day_arrow = "▲" if (day_chg_pct and day_chg_pct > 0) else ("▼" if (day_chg_pct and day_chg_pct < 0) else "─")
     pnl_arrow = "📈" if (pnl_pct and pnl_pct > 0) else ("📉" if (pnl_pct and pnl_pct < 0) else "➡️")
 
-    print("✓")
+    log.info(f"✓ Fetched {symbol}")
     return {
         "ticker":             ticker.upper(),
         "symbol":             symbol,
@@ -336,7 +339,7 @@ Total P&L: <code>Rp {(d.get('total_pnl') or 0):+,.0f}</code>
 # STEP 3 — CALL OLLAMA
 # ──────────────────────────────────────────────
 def call_ollama(prompt: str) -> str:
-    print(f"  🤖 Calling Ollama ({OLLAMA_MODEL})...", end=" ", flush=True)
+    log.info(f"🤖 Calling Ollama ({OLLAMA_MODEL})...")
     try:
         # Use /api/chat — more reliable for instruction-following models.
         # Split into system + user so the model doesn't consume tokens
@@ -376,13 +379,13 @@ def call_ollama(prompt: str) -> str:
 
         if not text:
             done_reason = data.get("done_reason", "unknown")
-            print(f"WARN: empty response (done_reason={done_reason})")
+            log.warning(f"Empty Ollama response (done_reason={done_reason})")
             return f"<b>⚠️ Model returned empty response</b>\n<i>done_reason: {done_reason}</i>"
 
-        print("✓")
+        log.info("✓ Ollama response received")
         return text
     except Exception as e:
-        print(f"ERROR: {e}")
+        log.error(f"Ollama error: {e}")
         return f"<b>⚠️ Ollama error</b>\n<code>{e}</code>"
 
 
@@ -459,17 +462,17 @@ def send_telegram_request(text: str, chat_id: str, max_retries: int = 3) -> bool
                 timeout=15,
             )
             if resp.status_code == 200:
-                print(f"  ✉️  Telegram sent ({len(text)} chars)")
+                log.info(f"✉️ Telegram sent ({len(text)} chars)")
                 return True
             if resp.status_code == 429:  # rate limited
                 wait = min(2 ** attempt, 10)
                 time.sleep(wait)
                 continue
-            print(f"  ⚠️  Telegram error {resp.status_code}: {resp.text[:200]}")
+            log.warning(f"⚠️ Telegram error {resp.status_code}: {resp.text[:200]}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
         except Exception as e:
-            print(f"  ⚠️  Telegram exception: {e}")
+            log.warning(f"⚠️ Telegram exception: {e}")
             if attempt < max_retries - 1:
                 time.sleep(2 ** attempt)
     return False
@@ -477,7 +480,7 @@ def send_telegram_request(text: str, chat_id: str, max_retries: int = 3) -> bool
 
 def send_telegram(text: str, chat_id: str = TELEGRAM_CHAT_ID):
     if not SEND_TELEGRAM:
-        print("  📵 Telegram disabled — printing instead:\n")
+        log.info("📵 Telegram disabled — printing instead:")
         print(text)
         print()
         return
@@ -535,12 +538,9 @@ def main():
         targets = portfolio
 
     now_str = now_wib().strftime("%A, %d %B %Y %H:%M WIB")
-    print(f"\n{'='*55}")
-    print(f"  IDX Portfolio Analyzer — {now_str}")
-    print(f"  Tickers : {', '.join(targets.keys())}")
-    print(f"  Model   : {OLLAMA_MODEL}")
-    print(f"  Telegram: {'ON' if SEND_TELEGRAM else 'OFF (print mode)'}")
-    print(f"{'='*55}\n")
+    log.info(f"IDX Portfolio Analyzer — {now_str}")
+    log.info(f"Tickers: {', '.join(targets.keys())}")
+    log.info(f"Model: {OLLAMA_MODEL} | Telegram: {'ON' if SEND_TELEGRAM else 'OFF'}")
 
     # Send session header to Telegram
     if SEND_TELEGRAM and not args.tickers:
@@ -560,7 +560,7 @@ def main():
     total_invested = 0
 
     for i, (ticker, meta) in enumerate(targets.items(), 1):
-        print(f"[{i}/{len(targets)}] {ticker}")
+        log.info(f"[{i}/{len(targets)}] {ticker}")
         avg = meta.get("avg_price") if isinstance(meta, dict) else None
         lots_count = meta.get("lots", 0) if isinstance(meta, dict) else 0
         notes_str = meta.get("notes", "") if isinstance(meta, dict) else ""
@@ -569,7 +569,7 @@ def main():
         data = fetch_stock(ticker, avg_price=avg, lots=lots_count, notes=notes_str)
         if "error" in data:
             errors.append(ticker)
-            print(f"  ⚠️  Skipping {ticker}: {data['error']}\n")
+            log.warning(f"⚠️ Skipping {ticker}: {data['error']}")
             if SEND_TELEGRAM:
                 send_telegram(f"⚠️ <b>{ticker}</b> — gagal fetch: <code>{data['error'][:200]}</code>")
             continue
@@ -585,10 +585,10 @@ def main():
         # Save raw snapshot to DB (skip if data came from cache)
         if data.get("from_cache"):
             snapshot_id = data.get("id")  # reuse existing snapshot id
-            print(f"  💾 Using cached snapshot (id={snapshot_id})")
+            log.info(f"💾 Using cached snapshot (id={snapshot_id})")
         else:
             snapshot_id = save_snapshot(data)
-            print(f"  💾 Snapshot saved (id={snapshot_id})")
+            log.info(f"💾 Snapshot saved (id={snapshot_id})")
 
         # Optionally skip LLM
         if args.no_llm:
@@ -604,7 +604,7 @@ def main():
         raw_llm = call_ollama(prompt)
         clean   = clean_for_telegram(raw_llm)
         rec     = extract_recommendation(clean)
-        print(f"  🎯 Recommendation: {rec}")
+        log.info(f"🎯 Recommendation: {rec}")
 
         # ── Duplicate suppression ──
         # Send if: recommendation changed, first time, or it's a new calendar day.
@@ -628,13 +628,13 @@ def main():
         should_send = SEND_TELEGRAM and not is_same
 
         if is_same:
-            print(f"  ⏭️  Same as previous ({prev_rec}) — skipping Telegram alert")
+            log.info(f"⏭️ Same as previous ({prev_rec}) — skipping Telegram alert")
         elif new_day and not rec_changed and bool(prev_rec):
-            print(f"  📅 New day — resending ({rec})")
+            log.info(f"📅 New day — resending ({rec})")
             send_telegram(clean)
         else:
             if prev_rec:
-                print(f"  🔔 Changed: {prev_rec} → {rec} — sending alert")
+                log.info(f"🔔 Changed: {prev_rec} → {rec} — sending alert")
             send_telegram(clean)
 
         save_analysis(snapshot_id, data["ticker"], OLLAMA_MODEL,
@@ -642,15 +642,13 @@ def main():
                       recommendation=rec,
                       sent=should_send,
                       skipped_same=is_same)
-        print(f"  💾 Analysis saved")
+        log.info(f"💾 Analysis saved")
 
         # Small delay between stocks to avoid Ollama + Telegram overload
         if i < len(targets):
             time.sleep(random.uniform(3, 6))  # jitter avoids pattern detection
 
-        print()
-
-    print("✅ Done.")
+    log.info("✅ Done.")
 
     # ── End-of-run summary ──
     if SEND_TELEGRAM and not args.tickers:  # only for full portfolio runs
