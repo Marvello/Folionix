@@ -29,6 +29,12 @@ services:
     extra_hosts:
       - "debian-tower:host-gateway"
     command: python /app/bot.py
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('https://api.telegram.org', timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
   # ── Streamlit UI ──
   idx-ui:
@@ -44,6 +50,12 @@ services:
     ports:
       - "8501:8501"
     command: streamlit run /app/ui.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     labels:
       - "com.dockflare.enable=true"
       - "com.dockflare.hostname=idx-portfolio"
