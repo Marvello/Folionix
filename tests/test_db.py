@@ -8,12 +8,12 @@ from db import (
     init_db, upsert_position, deactivate_position,
     get_all_positions, get_all_latest_snapshots,
     get_analyses, sync_portfolio_json,
-    save_snapshot, save_analysis, engine, metadata,
+    save_snapshot, save_analysis, get_engine, metadata,
 )
 
 def setup_function():
     """Reset DB before each test."""
-    metadata.drop_all(engine)
+    metadata.drop_all(get_engine())
     init_db()
 
 def test_upsert_and_get_positions():

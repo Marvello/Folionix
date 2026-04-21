@@ -20,12 +20,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./idx_portfolio.db")
-
-# connect_args only needed for SQLite (thread safety)
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine  = create_engine(DATABASE_URL, connect_args=connect_args, echo=False)
 metadata = MetaData()
+
+engine = None
+
+
+def get_engine():
+    global engine
+    if engine is None:
+        db_url = os.getenv("DATABASE_URL", "sqlite:///./idx_portfolio.db")
+        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+        engine = create_engine(db_url, connect_args=connect_args, echo=False)
+    return engine
 
 # ──────────────────────────────────────────────
 # TABLE DEFINITIONS
@@ -102,8 +108,9 @@ portfolio_positions = Table(
 
 def init_db():
     """Create all tables if they don't exist."""
-    metadata.create_all(engine)
-    print(f"  💾 DB ready: {DATABASE_URL}")
+    e = get_engine()
+    metadata.create_all(e)
+    print(f"  💾 DB ready: {e.url}")
 
 
 def upsert_portfolio(positions: list[dict]):
@@ -111,7 +118,7 @@ def upsert_portfolio(positions: list[dict]):
     Sync portfolio.json → portfolio_positions table.
     Inserts new tickers, updates existing ones.
     """
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         for pos in positions:
             existing = conn.execute(
                 portfolio_positions.select().where(
@@ -150,7 +157,7 @@ def save_snapshot(data: dict) -> int:
     Insert a market snapshot row.
     Returns the new row id (used to link llm_analyses).
     """
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         result = conn.execute(
             stock_snapshots.insert().values(
                 fetched_at         = datetime.now(timezone.utc),
@@ -195,7 +202,7 @@ def save_analysis(snapshot_id: int, ticker: str, model: str,
                   sent: bool = False,
                   skipped_same: bool = False) -> int:
     """Insert an LLM analysis row linked to a snapshot."""
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         result = conn.execute(
             llm_analyses.insert().values(
                 snapshot_id    = snapshot_id,
@@ -214,7 +221,7 @@ def save_analysis(snapshot_id: int, ticker: str, model: str,
 
 def get_latest_analysis(ticker: str) -> dict | None:
     """Fetch the most recent analysis for a ticker."""
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         row = conn.execute(
             llm_analyses.select()
             .where(llm_analyses.c.ticker == ticker.upper())
@@ -226,7 +233,7 @@ def get_latest_analysis(ticker: str) -> dict | None:
 
 def get_latest_snapshot(ticker: str) -> dict | None:
     """Fetch the most recent snapshot for a ticker."""
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         row = conn.execute(
             stock_snapshots.select()
             .where(stock_snapshots.c.ticker == ticker.upper())
@@ -238,7 +245,7 @@ def get_latest_snapshot(ticker: str) -> dict | None:
 
 def get_snapshots(ticker: str, limit: int = 10) -> list[dict]:
     """Fetch recent snapshots for a ticker — useful for trend review."""
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         rows = conn.execute(
             stock_snapshots.select()
             .where(stock_snapshots.c.ticker == ticker.upper())
@@ -250,7 +257,7 @@ def get_snapshots(ticker: str, limit: int = 10) -> list[dict]:
 
 def get_all_positions() -> list[dict]:
     """Get all active portfolio positions."""
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         rows = conn.execute(
             portfolio_positions.select()
             .where(portfolio_positions.c.active == 1)
@@ -261,7 +268,7 @@ def get_all_positions() -> list[dict]:
 
 def upsert_position(ticker: str, avg_price: float, lots: int, notes: str = ""):
     """Insert or update a single portfolio position."""
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         existing = conn.execute(
             portfolio_positions.select().where(
                 portfolio_positions.c.ticker == ticker.upper()
@@ -286,7 +293,7 @@ def upsert_position(ticker: str, avg_price: float, lots: int, notes: str = ""):
 
 def deactivate_position(ticker: str):
     """Set active=0 for a position."""
-    with engine.begin() as conn:
+    with get_engine().begin() as conn:
         conn.execute(
             portfolio_positions.update()
             .where(portfolio_positions.c.ticker == ticker.upper())
@@ -297,7 +304,7 @@ def deactivate_position(ticker: str):
 def get_all_latest_snapshots() -> list[dict]:
     """Get the most recent snapshot for each ticker."""
     from sqlalchemy import func, select
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         sub = (
             select(
                 stock_snapshots.c.ticker,
@@ -316,7 +323,7 @@ def get_all_latest_snapshots() -> list[dict]:
 
 def get_analyses(ticker: str, limit: int = 20) -> list[dict]:
     """Get recent analyses for a ticker, newest first."""
-    with engine.connect() as conn:
+    with get_engine().connect() as conn:
         rows = conn.execute(
             llm_analyses.select()
             .where(llm_analyses.c.ticker == ticker.upper())

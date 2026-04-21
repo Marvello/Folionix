@@ -65,13 +65,12 @@ def load_portfolio() -> dict:
         if p.get("active", True)
     }
 
-PORTFOLIO = load_portfolio()
-
 
 # ──────────────────────────────────────────────
 # STEP 1 — FETCH DATA
 # ──────────────────────────────────────────────
-def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
+def fetch_stock(ticker: str, avg_price: Optional[float] = None,
+                lots: int = 0, notes: str = "") -> dict:
     """
     Fetch price + fundamentals via yfinance with retry + backoff.
     Uses fast_info first (lighter), then info with up to 3 retries.
@@ -90,10 +89,9 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
             print(f"✓ (cached {age:.0f}m ago)")
             # Always re-read lots + avg_price from portfolio.json (not from snapshot)
             # so changes to portfolio.json take effect immediately without cache bust
-            pos             = PORTFOLIO.get(ticker.upper(), {})
             current_price   = cached.get("current_price")
-            avg_price_live  = pos.get("avg_price") or cached.get("avg_price")
-            lots_live       = pos.get("lots", 0)
+            avg_price_live  = avg_price or cached.get("avg_price")
+            lots_live       = lots
             pnl_live        = round(current_price - avg_price_live, 0) if (current_price and avg_price_live) else None
             pnl_pct_live    = round((pnl_live / avg_price_live) * 100, 2) if (pnl_live and avg_price_live) else None
             total_pnl_live  = round(pnl_live * lots_live * 100, 0) if (pnl_live and lots_live) else None
@@ -103,7 +101,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
             cached["unrealized_pnl"]     = pnl_live
             cached["unrealized_pnl_pct"] = pnl_pct_live
             cached["total_pnl"]          = total_pnl_live
-            cached["notes"]              = pos.get("notes", "")
+            cached["notes"]              = notes
             cached["pnl_arrow"]  = "📈" if (pnl_pct_live or 0) > 0 else ("📉" if (pnl_pct_live or 0) < 0 else "➡️")
             cached["day_arrow"]  = "▲" if (cached.get("day_change_pct") or 0) > 0 else ("▼" if (cached.get("day_change_pct") or 0) < 0 else "─")
             cached["market_cap"] = fmt_cap(cached.get("market_cap_raw"))
@@ -149,7 +147,6 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
     # ── P&L vs avg buy price ──
     pnl = pnl_pct = total_pnl = None
     position_status = "N/A"
-    lots = PORTFOLIO.get(ticker.upper(), {}).get("lots", 0)
     if current and avg_price:
         pnl       = round(current - avg_price, 0)           # per share
         pnl_pct   = round((pnl / avg_price) * 100, 2)
@@ -184,7 +181,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
         "name":               info.get("longName") or info.get("shortName", symbol),
         "sector":             info.get("sector", "N/A"),
         "industry":           info.get("industry", "N/A"),
-        "notes":              PORTFOLIO.get(ticker.upper(), {}).get("notes", ""),
+        "notes":              notes,
         "lots":               lots,
         # price
         "current_price":      current,
@@ -493,16 +490,15 @@ def main():
         SEND_TELEGRAM = False
 
     # Init DB and sync portfolio
+    portfolio = load_portfolio()
     init_db()
-    upsert_portfolio(list(PORTFOLIO.values()) if False else [
-        {"ticker": k, **v} for k, v in PORTFOLIO.items()
-    ])
+    upsert_portfolio([{"ticker": k, **v} for k, v in portfolio.items()])
 
     # Determine which tickers to analyze
     if args.tickers:
-        targets = {t.upper(): PORTFOLIO.get(t.upper(), {"avg_price": None, "lots": 0, "notes": ""}) for t in args.tickers}
+        targets = {t.upper(): portfolio.get(t.upper(), {"avg_price": None, "lots": 0, "notes": ""}) for t in args.tickers}
     else:
-        targets = PORTFOLIO
+        targets = portfolio
 
     now_str = now_wib().strftime("%A, %d %B %Y %H:%M WIB")
     print(f"\n{'='*55}")
@@ -527,9 +523,11 @@ def main():
     for i, (ticker, meta) in enumerate(targets.items(), 1):
         print(f"[{i}/{len(targets)}] {ticker}")
         avg = meta.get("avg_price") if isinstance(meta, dict) else None
+        lots_count = meta.get("lots", 0) if isinstance(meta, dict) else 0
+        notes_str = meta.get("notes", "") if isinstance(meta, dict) else ""
 
         # Fetch
-        data = fetch_stock(ticker, avg_price=avg)
+        data = fetch_stock(ticker, avg_price=avg, lots=lots_count, notes=notes_str)
         if "error" in data:
             print(f"  ⚠️  Skipping {ticker}: {data['error']}\n")
             continue
