@@ -537,6 +537,11 @@ def main():
         time.sleep(1)
 
     # Process each ticker
+    results = []       # successful tickers
+    errors = []        # failed tickers
+    total_pnl_sum = 0
+    total_invested = 0
+
     for i, (ticker, meta) in enumerate(targets.items(), 1):
         print(f"[{i}/{len(targets)}] {ticker}")
         avg = meta.get("avg_price") if isinstance(meta, dict) else None
@@ -546,8 +551,19 @@ def main():
         # Fetch
         data = fetch_stock(ticker, avg_price=avg, lots=lots_count, notes=notes_str)
         if "error" in data:
+            errors.append(ticker)
             print(f"  ⚠️  Skipping {ticker}: {data['error']}\n")
+            if SEND_TELEGRAM:
+                send_telegram(f"⚠️ <b>{ticker}</b> — gagal fetch: <code>{data['error'][:200]}</code>")
             continue
+
+        # Track P&L for end-of-run summary
+        if data.get("total_pnl") is not None:
+            total_pnl_sum += data["total_pnl"]
+        if data.get("avg_price") and data.get("lots"):
+            total_invested += data["avg_price"] * data["lots"] * 100
+
+        results.append(ticker)
 
         # Save raw snapshot to DB (skip if data came from cache)
         if data.get("from_cache"):
@@ -615,6 +631,33 @@ def main():
         print()
 
     print("✅ Done.")
+
+    # ── End-of-run summary ──
+    if SEND_TELEGRAM and not args.tickers:  # only for full portfolio runs
+        if not results and errors:
+            # All tickers failed
+            send_telegram(
+                f"🚨 <b>Portfolio fetch gagal total!</b>\n"
+                f"Semua {len(errors)} saham error: {', '.join(errors)}\n"
+                f"<i>Cek koneksi yfinance/Ollama.</i>"
+            )
+        elif results:
+            total_pct = (total_pnl_sum / total_invested * 100) if total_invested else 0
+            pnl_emoji = "📈" if total_pnl_sum >= 0 else "📉"
+            summary_lines = [
+                f"<b>{pnl_emoji} Portfolio Summary</b>",
+                f"✅ {len(results)} saham dianalisis",
+            ]
+            if errors:
+                summary_lines.append(f"⚠️ {len(errors)} gagal: {', '.join(errors)}")
+            summary_lines.extend([
+                f"",
+                f"<b>Total Investasi:</b> <code>{fmt_cap(total_invested)}</code>",
+                f"<b>Total P&L:</b> <code>Rp {total_pnl_sum:+,.0f} ({total_pct:+.2f}%)</code>",
+                f"",
+                f"<i>🤖 {OLLAMA_MODEL} | {now_str}</i>",
+            ])
+            send_telegram("\n".join(summary_lines))
 
 
 if __name__ == "__main__":
