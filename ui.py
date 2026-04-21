@@ -14,7 +14,7 @@ from db import (init_db, get_all_positions, upsert_position, deactivate_position
                 get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
                 get_snapshots, get_analyses, sync_portfolio_json,
                 get_recommendation_accuracy)
-from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html, get_version
+from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html, get_version, get_version_url
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
 UI_PASSWORD = os.getenv("UI_PASSWORD", "")
@@ -41,7 +41,7 @@ if UI_PASSWORD:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 IDX Portfolio")
-st.sidebar.caption(f"v {get_version()}")
+st.sidebar.caption(f"[v {get_version()}]({get_version_url()})")
 page = st.sidebar.radio("Navigation", ["Dashboard", "Positions", "History", "Analysis Log", "Accuracy"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

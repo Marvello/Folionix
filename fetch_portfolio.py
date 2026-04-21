@@ -29,7 +29,7 @@ import requests
 from dotenv import load_dotenv
 from db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis, get_snapshots
 from utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
-                   WIB, now_wib, fmt_wib, get_version)
+                   WIB, now_wib, fmt_wib, get_version, get_version_url)
 
 load_dotenv()
 
@@ -550,7 +550,7 @@ def main():
             f"<i>{now_str}</i>\n\n"
             f"Menganalisis {len(targets)} saham dalam portofolio...\n"
             f"<i>⏳ Mohon tunggu, data sedang diambil dari Yahoo Finance.</i>\n"
-            f"<i>v{get_version()}</i>"
+            f"<i><a href=\"{get_version_url()}\">v{get_version()}</a></i>"
         )
         send_telegram(header)
         time.sleep(1)
@@ -675,7 +675,7 @@ def main():
                 f"<b>Total Investasi:</b> <code>{fmt_cap(total_invested)}</code>",
                 f"<b>Total P&L:</b> <code>Rp {total_pnl_sum:+,.0f} ({total_pct:+.2f}%)</code>",
                 f"",
-                f"<i>🤖 {OLLAMA_MODEL} | {now_str} | v{get_version()}</i>",
+                f"<i>🤖 {OLLAMA_MODEL} | {now_str} | <a href=\"{get_version_url()}\">v{get_version()}</a></i>",
             ])
             send_telegram("\n".join(summary_lines))
 

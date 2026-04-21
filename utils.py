@@ -8,6 +8,8 @@ from typing import Optional
 
 WIB = timezone(timedelta(hours=7))
 
+GITHUB_REPO_URL = "https://github.com/Marvello/my-stocks"
+
 _version_cache: str | None = None
 
 
@@ -26,8 +28,13 @@ def get_version() -> str:
             ).strip()
         except Exception:
             v = "unknown"
-    _version_cache = v
-    return v
+    _version_cache = v[:7] if len(v) > 7 else v
+    return _version_cache
+
+
+def get_version_url() -> str:
+    """Return GitHub commit URL for current version."""
+    return f"{GITHUB_REPO_URL}/commit/{get_version()}"
 
 
 def safe_float(val, decimals: int = 2) -> Optional[float]:
