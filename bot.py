@@ -23,10 +23,11 @@ ALLOWED_CHAT_ID  = str(TELEGRAM_CHAT_ID)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, upsert_position, deactivate_position,
                 get_all_positions, get_latest_snapshot, get_latest_analysis,
                 sync_portfolio_json)
+from utils import fmt_idr, fmt_cap, pnl_icon
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
@@ -47,26 +48,6 @@ def get_updates(offset=0):
         return r.json().get("result", [])
     except Exception:
         return []
-
-def fmt_idr(val):
-    if val is None: return "N/A"
-    return f"Rp {float(val):,.0f}"
-
-def fmt_cap(val):
-    if not val: return "N/A"
-    v = float(val)
-    if v >= 1e12: return f"Rp {v/1e12:.2f} T"
-    if v >= 1e9:  return f"Rp {v/1e9:.2f} M"
-    return fmt_idr(v)
-
-def pnl_icon(pct):
-    if pct is None: return "❓"
-    if pct >= 10:  return "🟢"
-    if pct >= 2:   return "🟢"
-    if pct >= -2:  return "⚪"
-    if pct >= -10: return "🟡"
-    if pct >= -20: return "🔴"
-    return "🔴"
 
 # ── Handlers ──────────────────────────────────
 

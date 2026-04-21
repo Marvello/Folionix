@@ -5,17 +5,17 @@ Run: streamlit run ui.py --server.port 8501
 """
 
 import os, sys, json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 import streamlit as st
 import pandas as pd
 
-sys.path.insert(0, "/app")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, get_all_positions, upsert_position, deactivate_position,
                 get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
                 get_snapshots, get_analyses, sync_portfolio_json)
+from utils import fmt_idr, fmt_cap, pnl_icon, to_wib, WIB
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
-WIB = timezone(timedelta(hours=7))
 
 init_db()
 
@@ -26,25 +26,9 @@ st.sidebar.title("📈 IDX Portfolio")
 page = st.sidebar.radio("Navigation", ["Dashboard", "Positions", "History", "Analysis Log"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def fmt_idr(val, dec=0):
-    if val is None: return "—"
-    return f"Rp {float(val):,.{dec}f}"
-
-def fmt_cap(val):
-    if not val: return "—"
-    v = float(val)
-    if v >= 1e12: return f"Rp {v/1e12:.2f} T"
-    if v >= 1e9:  return f"Rp {v/1e9:.2f} M"
-    return fmt_idr(v)
-
-def pnl_color(val):
-    if val is None: return "⚪"
-    return "🟢" if val >= 0 else "🔴"
-
 def ts_wib(dt):
     if dt is None: return "—"
-    if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(WIB).strftime("%d %b %Y %H:%M")
+    return to_wib(dt).strftime("%d %b %Y %H:%M")
 
 
 # ── PAGE: Dashboard ───────────────────────────────────────────────────────────

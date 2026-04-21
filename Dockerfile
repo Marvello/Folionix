@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y curl && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY fetch_portfolio.py db.py bot.py ui.py crontab ./
+COPY fetch_portfolio.py db.py bot.py ui.py utils.py crontab ./
 
 ENV PYTHONUNBUFFERED=1
 
