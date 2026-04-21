@@ -17,10 +17,27 @@ from db import (init_db, get_all_positions, upsert_position, deactivate_position
 from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
+UI_PASSWORD = os.getenv("UI_PASSWORD", "")
 
 init_db()
 
 st.set_page_config(page_title="IDX Portfolio", page_icon="📈", layout="wide")
+
+# ── Auth ─────────────────────────────────────────────────────────────────────
+if UI_PASSWORD:
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if not st.session_state.authenticated:
+        st.title("🔒 Login Required")
+        pwd = st.text_input("Password", type="password")
+        if st.button("Login"):
+            if pwd == UI_PASSWORD:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Password salah.")
+        st.stop()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 IDX Portfolio")
