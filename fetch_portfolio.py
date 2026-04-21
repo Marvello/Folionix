@@ -26,7 +26,7 @@ from typing import Optional
 import yfinance as yf
 import requests
 from dotenv import load_dotenv
-from db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis
+from db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis, get_snapshots
 from utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
                    WIB, now_wib, fmt_wib)
 
@@ -229,7 +229,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
 # ──────────────────────────────────────────────
 # STEP 2 — BUILD PROMPT
 # ──────────────────────────────────────────────
-def build_prompt(d: dict) -> str:
+def build_prompt(d: dict, history: list[dict] | None = None) -> str:
     now = now_wib()  # from utils — returns WIB-aware datetime
     hour = now.hour
     minute = now.minute
@@ -269,6 +269,21 @@ POSISI INVESTOR:
 - Jarak dari 52W High   : {d['dist_from_high']}%
 - Jarak dari 52W Low    : {d['dist_from_low']}%"""
 
+    trend_block = ""
+    if history and len(history) > 1:
+        trend_lines = ["TREND HARGA (terbaru → lama):"]
+        for snap in history[:5]:
+            ts = snap.get("fetched_at")
+            if ts:
+                ts_str = fmt_wib(ts) if hasattr(ts, 'strftime') else str(ts)
+            else:
+                ts_str = "N/A"
+            price = snap.get("current_price", "N/A")
+            day_pct = snap.get("day_change_pct")
+            day_str = f"{day_pct:+.2f}%" if day_pct is not None else "N/A"
+            trend_lines.append(f"- {ts_str}: Rp {price:,.0f} ({day_str})")
+        trend_block = "\n".join(trend_lines)
+
     return f"""Kamu adalah analis saham IDX yang membantu investor retail memutuskan BUY/SELL/HOLD secara real-time.
 
 === SESI BURSA: {session} ===
@@ -288,6 +303,8 @@ FUNDAMENTAL:
 - ROE: {d['roe_pct']}% | Profit Margin: {d['profit_margin_pct']}%
 - Dividend Yield: {d['div_yield_pct']}% | EPS: {fmt_idr(d['eps'], 2)}
 - Debt/Equity: {d['debt_to_equity']} | Market Cap: {d['market_cap']}
+
+{trend_block}
 
 INSTRUKSI FORMAT:
 Tulis HANYA dalam HTML Telegram. Gunakan HANYA tag: <b>, <i>, <code>.
@@ -579,8 +596,11 @@ def main():
             print()
             continue
 
+        # Fetch trend data for LLM context
+        history = get_snapshots(ticker, limit=5)
+
         # Build prompt → call Ollama → clean
-        prompt  = build_prompt(data)
+        prompt  = build_prompt(data, history=history)
         raw_llm = call_ollama(prompt)
         clean   = clean_for_telegram(raw_llm)
         rec     = extract_recommendation(clean)
