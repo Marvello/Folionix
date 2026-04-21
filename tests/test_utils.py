@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from utils import fmt_idr, fmt_cap, sign, safe_float, normalize_ticker, pnl_icon, WIB, now_wib, fmt_wib, to_wib
+from utils import fmt_idr, fmt_cap, sign, safe_float, normalize_ticker, pnl_icon, calc_pnl, WIB, now_wib, fmt_wib, to_wib
 
 from datetime import datetime, timezone, timedelta
 
@@ -43,6 +43,24 @@ def test_pnl_icon():
     assert pnl_icon(-15) == "🔴"
     assert pnl_icon(-25) == "🔴"
     assert pnl_icon(None) == "❓"
+
+def test_calc_pnl():
+    p = calc_pnl(10000, 8000, 10)
+    assert p["pnl"] == 2000
+    assert p["pnl_pct"] == 25.0
+    assert p["total_pnl"] == 2000 * 10 * 100  # 2_000_000
+    assert p["invested"] == 8000 * 10 * 100    # 8_000_000
+
+def test_calc_pnl_loss():
+    p = calc_pnl(7000, 8000, 5)
+    assert p["pnl"] == -1000
+    assert p["pnl_pct"] == -12.5
+    assert p["total_pnl"] == -1000 * 5 * 100
+
+def test_calc_pnl_zero_lots():
+    p = calc_pnl(10000, 8000, 0)
+    assert p["total_pnl"] == 0
+    assert p["invested"] == 0
 
 def test_now_wib_is_aware():
     dt = now_wib()

@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, get_all_positions, upsert_position, deactivate_position,
                 get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
                 get_snapshots, get_analyses, sync_portfolio_json)
-from utils import fmt_idr, fmt_cap, pnl_icon, to_wib, WIB
+from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
 
@@ -59,24 +59,21 @@ if page == "Dashboard":
         rec    = (analysis.get("recommendation") or "—") if analysis else "—"
 
         if avg and lots and price:
-            pnl_sh    = price - avg
-            pnl_pct   = (pnl_sh / avg) * 100
-            t_pnl     = pnl_sh * lots * 100
-            invested  = avg * lots * 100
-            total_inv  += invested
-            total_pnl  += t_pnl
+            p = calc_pnl(price, avg, lots)
+            total_inv  += p["invested"]
+            total_pnl  += p["total_pnl"]
         else:
-            pnl_pct = t_pnl = invested = 0
+            p = {"pnl": 0, "pnl_pct": 0, "total_pnl": 0, "invested": 0}
 
         rows.append({
             "Ticker":       ticker,
             "Harga":        price,
             "Avg Beli":     avg,
             "Lots":         lots,
-            "Invested":     invested,
-            "P&L/lembar":   price - avg if avg else 0,
-            "P&L %":        pnl_pct,
-            "Total P&L":    t_pnl,
+            "Invested":     p["invested"],
+            "P&L/lembar":   p["pnl"],
+            "P&L %":        p["pnl_pct"],
+            "Total P&L":    p["total_pnl"],
             "Rekomendasi":  rec,
             "Update":       ts_wib(s.get("fetched_at")),
         })

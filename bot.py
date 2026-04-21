@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, upsert_position, deactivate_position,
                 get_all_positions, get_latest_snapshot, get_latest_analysis,
                 sync_portfolio_json)
-from utils import fmt_idr, fmt_cap, pnl_icon
+from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
@@ -38,14 +38,25 @@ def sanitize_ticker(raw: str) -> str | None:
         return t
     return None
 
-def send(chat_id, text, parse_mode="HTML"):
-    try:
-        requests.post(f"{BASE}/sendMessage", json={
-            "chat_id": chat_id, "text": text,
-            "parse_mode": parse_mode, "disable_web_page_preview": True,
-        }, timeout=15)
-    except Exception as e:
-        log.error(f"Send error: {e}")
+def send(chat_id, text, parse_mode="HTML", max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(f"{BASE}/sendMessage", json={
+                "chat_id": chat_id, "text": text,
+                "parse_mode": parse_mode, "disable_web_page_preview": True,
+            }, timeout=15)
+            if resp.status_code == 200:
+                return
+            if resp.status_code == 429:
+                time.sleep(min(2 ** attempt, 10))
+                continue
+            log.warning(f"Telegram {resp.status_code}: {resp.text[:200]}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+        except Exception as e:
+            log.error(f"Send error: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
 
 def get_updates(offset=0):
     try:
@@ -85,19 +96,16 @@ def cmd_status(chat_id, _):
         analysis = get_latest_analysis(ticker)
 
         if snap and snap.get("current_price"):
-            price     = snap["current_price"]
-            pnl_sh    = price - avg
-            pnl_pct   = (pnl_sh / avg) * 100
-            total_pnl = pnl_sh * lots * 100
-            invested  = avg * lots * 100
-            rec       = (analysis.get("recommendation") or "—") if analysis else "—"
-            total_inv     += invested
-            total_pnl_all += total_pnl
+            price = snap["current_price"]
+            p     = calc_pnl(price, avg, lots)
+            rec   = (analysis.get("recommendation") or "—") if analysis else "—"
+            total_inv     += p["invested"]
+            total_pnl_all += p["total_pnl"]
             lines.append(
-                f"{pnl_icon(pnl_pct)} <b>{ticker}</b> {lots}lot "
+                f"{pnl_icon(p['pnl_pct'])} <b>{ticker}</b> {lots}lot "
                 f"<code>{fmt_idr(price)}</code> "
-                f"({'+' if pnl_pct >= 0 else ''}{pnl_pct:.1f}%) "
-                f"P&amp;L: <code>Rp {total_pnl:+,.0f}</code> | {rec}"
+                f"({'+' if p['pnl_pct'] >= 0 else ''}{p['pnl_pct']:.1f}%) "
+                f"P&amp;L: <code>Rp {p['total_pnl']:+,.0f}</code> | {rec}"
             )
         else:
             lines.append(f"❓ <b>{ticker}</b> {lots}lot — belum ada data")

@@ -53,6 +53,20 @@ def pnl_icon(pct) -> str:
     return "🔴"
 
 
+def calc_pnl(current_price: float, avg_price: float, lots: int = 0) -> dict:
+    """Calculate P&L metrics. Returns dict with pnl, pnl_pct, total_pnl, invested."""
+    pnl = round(current_price - avg_price, 0)
+    pnl_pct = round((pnl / avg_price) * 100, 2) if avg_price else 0
+    total_pnl = round(pnl * lots * 100, 0) if lots else 0
+    invested = avg_price * lots * 100 if (avg_price and lots) else 0
+    return {
+        "pnl": pnl,
+        "pnl_pct": pnl_pct,
+        "total_pnl": total_pnl,
+        "invested": invested,
+    }
+
+
 def now_wib() -> datetime:
     """Current time in WIB (Asia/Jakarta, UTC+7)."""
     return datetime.now(WIB)
