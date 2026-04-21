@@ -20,13 +20,15 @@ import os
 import time
 import random
 import argparse
-from datetime import datetime, timedelta, timezone, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import yfinance as yf
 import requests
 from dotenv import load_dotenv
 from db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis
+from utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
+                   WIB, now_wib, fmt_wib)
 
 load_dotenv()
 
@@ -64,47 +66,6 @@ def load_portfolio() -> dict:
     }
 
 PORTFOLIO = load_portfolio()
-
-
-# ──────────────────────────────────────────────
-# HELPERS
-# ──────────────────────────────────────────────
-def normalize_ticker(ticker: str) -> str:
-    t = ticker.upper().strip()
-    if t in ("IHSG", "JKSE", "^JKSE"):   return "^JKSE"
-    if t in ("LQ45", "^JKLQ45"):          return "^JKLQ45"
-    if not t.startswith("^") and not t.endswith(".JK"):
-        return t + ".JK"
-    return t
-
-
-def safe_float(val, decimals: int = 2) -> Optional[float]:
-    try:
-        f = float(val)
-        if f != f or abs(f) > 1e15:  # nan / inf guard
-            return None
-        return round(f, decimals)
-    except (TypeError, ValueError):
-        return None
-
-
-def fmt_idr(val, decimals: int = 0) -> str:
-    if val is None:
-        return "N/A"
-    return f"Rp {val:,.{decimals}f}"
-
-
-def fmt_cap(val) -> str:
-    if val is None:
-        return "N/A"
-    v = float(val)
-    if v >= 1e12: return f"Rp {v/1e12:.2f} T"
-    if v >= 1e9:  return f"Rp {v/1e9:.2f} M"
-    return fmt_idr(v)
-
-
-def sign(val) -> str:
-    return "+" if val and val > 0 else ""
 
 
 # ──────────────────────────────────────────────
@@ -147,7 +108,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
             cached["day_arrow"]  = "▲" if (cached.get("day_change_pct") or 0) > 0 else ("▼" if (cached.get("day_change_pct") or 0) < 0 else "─")
             cached["market_cap"] = fmt_cap(cached.get("market_cap_raw"))
             cached["revenue"]    = fmt_cap(cached.get("revenue_raw"))
-            cached["fetched_at"] = cached["fetched_at"].strftime("%d %b %Y %H:%M WIB")
+            cached["fetched_at_display"] = fmt_wib(cached["fetched_at"])
             cached["from_cache"] = True
             return cached
 
@@ -257,7 +218,8 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
         "market_cap_raw":     safe_float(info.get("marketCap"), 0),
         "revenue_raw":        safe_float(info.get("totalRevenue"), 0),
         # meta
-        "fetched_at":         datetime.now().strftime("%d %b %Y %H:%M WIB"),
+        "fetched_at":         datetime.now(timezone.utc),
+        "fetched_at_display": fmt_wib(datetime.now(timezone.utc)),
         "from_cache":         False,
     }
 
@@ -266,9 +228,9 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None) -> dict:
 # STEP 2 — BUILD PROMPT
 # ──────────────────────────────────────────────
 def build_prompt(d: dict) -> str:
-    now_wib = datetime.now()
-    hour = now_wib.hour
-    minute = now_wib.minute
+    now = now_wib()  # from utils — returns WIB-aware datetime
+    hour = now.hour
+    minute = now.minute
 
     # Session context
     if   hour == 9  and minute == 0:  session = "PEMBUKAAN SESI 1 (09:00)"
@@ -542,7 +504,7 @@ def main():
     else:
         targets = PORTFOLIO
 
-    now_str = datetime.now().strftime("%A, %d %B %Y %H:%M WIB")
+    now_str = now_wib().strftime("%A, %d %B %Y %H:%M WIB")
     print(f"\n{'='*55}")
     print(f"  IDX Portfolio Analyzer — {now_str}")
     print(f"  Tickers : {', '.join(targets.keys())}")
