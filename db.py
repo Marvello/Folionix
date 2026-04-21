@@ -28,7 +28,7 @@ engine = None
 def get_engine():
     global engine
     if engine is None:
-        db_url = os.getenv("DATABASE_URL", "sqlite:///./idx_portfolio.db")
+        db_url = os.getenv("DATABASE_URL", "sqlite:///./data/idx_portfolio.db")
         connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
         engine = create_engine(db_url, connect_args=connect_args, echo=False)
         # Enable WAL mode for SQLite — allows concurrent reads during writes
