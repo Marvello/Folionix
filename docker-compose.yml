@@ -1,10 +1,10 @@
 services:
 
-  # ── Scheduled analyzer (run-and-exit, called by cron) ──
-  idx-analyzer:
+  # ── Cron scheduler (replaces host crontab) ──
+  idx-cron:
     build: .
-    container_name: idx-analyzer
-    restart: "no"
+    container_name: idx-cron
+    restart: unless-stopped
     env_file: .env
     environment:
       - TZ=Asia/Jakarta
@@ -13,8 +13,9 @@ services:
       - ./data:/app/data
     extra_hosts:
       - "debian-tower:host-gateway"
+    command: supercronic /app/crontab
 
-  # ── Telegram bot (always-on) ──
+  # ── Telegram bot ──
   idx-bot:
     build: .
     container_name: idx-bot
