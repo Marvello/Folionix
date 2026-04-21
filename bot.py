@@ -79,6 +79,7 @@ def cmd_help(chat_id, _):
         "  <code>/update BMRI 4500 120</code>\n"
         "<b>/remove TICKER</b> — nonaktifkan posisi\n"
         "<b>/analyze TICKER</b> — analisis on-demand\n"
+        "<b>/portfolio</b> — export semua posisi\n"
         "<b>/accuracy [HARI]</b> — akurasi rekomendasi (default: 3 hari)\n"
         "  <code>/accuracy 7</code>\n"
         "<b>/help</b> — bantuan ini"
@@ -209,12 +210,34 @@ def cmd_accuracy(chat_id, args):
 
     send(chat_id, "\n".join(lines))
 
+def cmd_portfolio(chat_id, _):
+    positions = get_all_positions()
+    if not positions:
+        send(chat_id, "📭 Portfolio kosong."); return
+
+    lines = ["<b>📋 Portfolio Export</b>\n"]
+    total_invested = 0
+    for pos in positions:
+        invested = pos["avg_price"] * pos["lots"] * 100
+        total_invested += invested
+        lines.append(
+            f"<b>{pos['ticker']}</b> | {pos['lots']}lot "
+            f"@ <code>{fmt_idr(pos['avg_price'], 2)}</code> "
+            f"= <code>{fmt_cap(invested)}</code>"
+        )
+        if pos.get("notes"):
+            lines.append(f"  <i>{pos['notes']}</i>")
+
+    lines.append(f"\n<b>Total Modal:</b> <code>{fmt_cap(total_invested)}</code>")
+    send(chat_id, "\n".join(lines))
+
 COMMANDS = {
     "/help": cmd_help, "/start": cmd_help,
     "/status": cmd_status,
     "/add": cmd_add, "/update": cmd_update,
     "/remove": cmd_remove,
     "/analyze": cmd_analyze,
+    "/portfolio": cmd_portfolio,
     "/accuracy": cmd_accuracy,
 }
 
