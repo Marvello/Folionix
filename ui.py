@@ -4,7 +4,7 @@ ui.py — Streamlit dashboard for IDX Portfolio Analyzer
 Run: streamlit run ui.py --server.port 8501
 """
 
-import os, sys, json
+import os, sys, json, re
 from datetime import datetime
 import streamlit as st
 import pandas as pd
@@ -16,6 +16,10 @@ from db import (init_db, get_all_positions, upsert_position, deactivate_position
 from utils import fmt_idr, fmt_cap, pnl_icon, to_wib, WIB
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
+
+def sanitize_html(html: str) -> str:
+    """Strip all HTML tags except b, i, code."""
+    return re.sub(r"<(?!\/?(?:b|i|code)(?:\s[^>]*)?>)[^>]+>", "", html)
 
 init_db()
 
@@ -219,6 +223,6 @@ elif page == "Analysis Log":
         rec = a.get("recommendation") or "—"
         sent = "✉️ Terkirim" if a.get("sent_telegram") else ("⏭️ Dilewati" if a.get("skipped_same") else "🔇 Tidak dikirim")
         with st.expander(f"**{ts}** | {rec} | {sent}"):
-            st.markdown(a.get("clean_html", "—"), unsafe_allow_html=True)
+            st.markdown(sanitize_html(a.get("clean_html", "—")), unsafe_allow_html=True)
             if st.toggle("Lihat raw output", key=f"raw_{a['id']}"):
                 st.code(a.get("raw_output", ""), language="html")

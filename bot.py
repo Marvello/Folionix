@@ -10,7 +10,7 @@ Commands:
   /help
 """
 
-import os, sys, time, logging, requests, subprocess
+import os, sys, time, logging, requests, subprocess, re
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -30,6 +30,13 @@ from db import (init_db, upsert_position, deactivate_position,
 from utils import fmt_idr, fmt_cap, pnl_icon
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
+
+def sanitize_ticker(raw: str) -> str | None:
+    """Allow only 1-10 uppercase alphanumeric chars."""
+    t = raw.upper().strip()
+    if re.match(r"^[A-Z0-9]{1,10}$", t):
+        return t
+    return None
 
 def send(chat_id, text, parse_mode="HTML"):
     try:
@@ -106,7 +113,10 @@ def cmd_status(chat_id, _):
 def cmd_add(chat_id, args):
     if len(args) < 3:
         send(chat_id, "⚠️ Format: <code>/add TICKER AVGPRICE LOTS [notes]</code>"); return
-    ticker = args[0].upper()
+    ticker = sanitize_ticker(args[0])
+    if not ticker:
+        send(chat_id, "⚠️ Ticker tidak valid. Gunakan huruf/angka saja (maks 10 karakter).")
+        return
     try:
         avg  = float(args[1].replace(",", ""))
         lots = int(args[2])
@@ -127,7 +137,10 @@ def cmd_update(chat_id, args):
 def cmd_remove(chat_id, args):
     if not args:
         send(chat_id, "⚠️ Format: <code>/remove TICKER</code>"); return
-    ticker = args[0].upper()
+    ticker = sanitize_ticker(args[0])
+    if not ticker:
+        send(chat_id, "⚠️ Ticker tidak valid.")
+        return
     if not any(p["ticker"] == ticker for p in get_all_positions()):
         send(chat_id, f"⚠️ <b>{ticker}</b> tidak ditemukan."); return
     deactivate_position(ticker)
@@ -137,7 +150,10 @@ def cmd_remove(chat_id, args):
 def cmd_analyze(chat_id, args):
     if not args:
         send(chat_id, "⚠️ Format: <code>/analyze TICKER</code>"); return
-    ticker = args[0].upper()
+    ticker = sanitize_ticker(args[0])
+    if not ticker:
+        send(chat_id, "⚠️ Ticker tidak valid.")
+        return
     send(chat_id, f"⏳ Menganalisis <b>{ticker}</b>...")
     try:
         result = subprocess.run(
