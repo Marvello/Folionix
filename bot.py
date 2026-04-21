@@ -121,29 +121,52 @@ def cmd_status(chat_id, _):
         )
     send(chat_id, "\n".join(lines))
 
-def cmd_add(chat_id, args):
-    if len(args) < 3:
-        send(chat_id, "⚠️ Format: <code>/add TICKER AVGPRICE LOTS [notes]</code>"); return
+def _parse_position_args(args, min_args=3, usage=""):
+    """Parse ticker, avg_price, lots from command args. Returns (ticker, avg, lots, notes) or sends error."""
+    if len(args) < min_args:
+        return None
     ticker = sanitize_ticker(args[0])
     if not ticker:
-        send(chat_id, "⚠️ Ticker tidak valid. Gunakan huruf/angka saja (maks 10 karakter).")
-        return
+        return None
     try:
         avg  = float(args[1].replace(",", ""))
         lots = int(args[2])
     except ValueError:
-        send(chat_id, "⚠️ AVGPRICE harus angka, LOTS harus bilangan bulat."); return
+        return None
     notes = " ".join(args[3:]) if len(args) > 3 else ""
+    return ticker, avg, lots, notes
+
+def cmd_add(chat_id, args):
+    parsed = _parse_position_args(args)
+    if not parsed:
+        send(chat_id, "⚠️ Format: <code>/add TICKER AVGPRICE LOTS [notes]</code>"); return
+    ticker, avg, lots, notes = parsed
+    existing = [p["ticker"] for p in get_all_positions()]
+    if ticker in existing:
+        send(chat_id, f"⚠️ <b>{ticker}</b> sudah ada. Gunakan /update untuk mengubah."); return
     upsert_position(ticker, avg, lots, notes)
     sync_portfolio_json(PORTFOLIO_FILE)
     send(chat_id, (
-        f"✅ <b>{ticker}</b> disimpan\n"
+        f"✅ <b>{ticker}</b> ditambahkan\n"
         f"Avg: <code>{fmt_idr(avg)}</code> | Lots: <code>{lots}</code> | "
         f"Invested: <code>{fmt_cap(avg * lots * 100)}</code>"
     ))
 
 def cmd_update(chat_id, args):
-    cmd_add(chat_id, args)
+    parsed = _parse_position_args(args)
+    if not parsed:
+        send(chat_id, "⚠️ Format: <code>/update TICKER AVGPRICE LOTS [notes]</code>"); return
+    ticker, avg, lots, notes = parsed
+    existing = [p["ticker"] for p in get_all_positions()]
+    if ticker not in existing:
+        send(chat_id, f"⚠️ <b>{ticker}</b> tidak ditemukan. Gunakan /add untuk menambahkan."); return
+    upsert_position(ticker, avg, lots, notes)
+    sync_portfolio_json(PORTFOLIO_FILE)
+    send(chat_id, (
+        f"✅ <b>{ticker}</b> diperbarui\n"
+        f"Avg: <code>{fmt_idr(avg)}</code> | Lots: <code>{lots}</code> | "
+        f"Invested: <code>{fmt_cap(avg * lots * 100)}</code>"
+    ))
 
 def cmd_remove(chat_id, args):
     if not args:
@@ -261,10 +284,29 @@ def handle_message(message):
     else:
         send(chat_id, f"❓ Command tidak dikenal. Ketik /help")
 
+def register_commands():
+    """Register bot commands with Telegram for autocomplete menu."""
+    commands = [
+        {"command": "status", "description": "Portfolio P&L summary"},
+        {"command": "add", "description": "Tambah posisi: /add TICKER AVGPRICE LOTS"},
+        {"command": "update", "description": "Update posisi: /update TICKER AVGPRICE LOTS"},
+        {"command": "remove", "description": "Nonaktifkan posisi: /remove TICKER"},
+        {"command": "analyze", "description": "Analisis on-demand: /analyze TICKER"},
+        {"command": "portfolio", "description": "Export semua posisi"},
+        {"command": "accuracy", "description": "Akurasi rekomendasi: /accuracy [HARI]"},
+        {"command": "help", "description": "Tampilkan bantuan"},
+    ]
+    try:
+        requests.post(f"{BASE}/setMyCommands", json={"commands": commands}, timeout=10)
+        log.info("Bot commands registered")
+    except Exception as e:
+        log.warning(f"Failed to register commands: {e}")
+
 def main():
     if not TELEGRAM_TOKEN:
         log.error("TELEGRAM_TOKEN not set"); sys.exit(1)
     init_db()
+    register_commands()
     log.info(f"Bot started. Allowed chat_id={ALLOWED_CHAT_ID}")
     send(ALLOWED_CHAT_ID, f"🤖 <b>IDX Portfolio Bot online.</b> v{get_version()} | Ketik /help.")
     offset = 0
