@@ -8,6 +8,7 @@ is a single env var change:
   Postgres (later) : DATABASE_URL=postgresql://user:pass@host:5432/idx_portfolio
 """
 
+import json
 import os
 from datetime import datetime, timezone
 from sqlalchemy import (
@@ -245,3 +246,101 @@ def get_snapshots(ticker: str, limit: int = 10) -> list[dict]:
             .limit(limit)
         ).fetchall()
         return [dict(r._mapping) for r in rows]
+
+
+def get_all_positions() -> list[dict]:
+    """Get all active portfolio positions."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            portfolio_positions.select()
+            .where(portfolio_positions.c.active == 1)
+            .order_by(portfolio_positions.c.ticker)
+        ).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
+def upsert_position(ticker: str, avg_price: float, lots: int, notes: str = ""):
+    """Insert or update a single portfolio position."""
+    with engine.begin() as conn:
+        existing = conn.execute(
+            portfolio_positions.select().where(
+                portfolio_positions.c.ticker == ticker.upper()
+            )
+        ).fetchone()
+        now = datetime.now(timezone.utc)
+        if existing:
+            conn.execute(
+                portfolio_positions.update()
+                .where(portfolio_positions.c.ticker == ticker.upper())
+                .values(avg_price=avg_price, lots=lots, active=1,
+                        notes=notes, updated_at=now)
+            )
+        else:
+            conn.execute(
+                portfolio_positions.insert().values(
+                    ticker=ticker.upper(), avg_price=avg_price,
+                    lots=lots, active=1, notes=notes, updated_at=now,
+                )
+            )
+
+
+def deactivate_position(ticker: str):
+    """Set active=0 for a position."""
+    with engine.begin() as conn:
+        conn.execute(
+            portfolio_positions.update()
+            .where(portfolio_positions.c.ticker == ticker.upper())
+            .values(active=0, updated_at=datetime.now(timezone.utc))
+        )
+
+
+def get_all_latest_snapshots() -> list[dict]:
+    """Get the most recent snapshot for each ticker."""
+    from sqlalchemy import func, select
+    with engine.connect() as conn:
+        sub = (
+            select(
+                stock_snapshots.c.ticker,
+                func.max(stock_snapshots.c.id).label("max_id")
+            )
+            .group_by(stock_snapshots.c.ticker)
+            .subquery()
+        )
+        rows = conn.execute(
+            stock_snapshots.select().where(
+                stock_snapshots.c.id == sub.c.max_id
+            )
+        ).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
+def get_analyses(ticker: str, limit: int = 20) -> list[dict]:
+    """Get recent analyses for a ticker, newest first."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            llm_analyses.select()
+            .where(llm_analyses.c.ticker == ticker.upper())
+            .order_by(llm_analyses.c.analysed_at.desc())
+            .limit(limit)
+        ).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
+def sync_portfolio_json(path: str):
+    """Write active DB positions back to portfolio.json."""
+    positions = get_all_positions()
+    data = {
+        "_comment": "Auto-synced from database.",
+        "positions": [
+            {
+                "ticker": p["ticker"],
+                "avg_price": p["avg_price"],
+                "lots": p["lots"],
+                "active": True,
+                "notes": p.get("notes", ""),
+            }
+            for p in positions
+        ],
+    }
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
