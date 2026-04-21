@@ -2,10 +2,7 @@ services:
 
   # ── Cron scheduler (replaces host crontab) ──
   idx-cron:
-    build:
-      context: .
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: ghcr.io/marvello/my-stocks:latest
     container_name: idx-cron
     restart: unless-stopped
     env_file: .env
@@ -20,10 +17,7 @@ services:
 
   # ── Telegram bot ──
   idx-bot:
-    build:
-      context: .
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: ghcr.io/marvello/my-stocks:latest
     container_name: idx-bot
     restart: unless-stopped
     env_file: .env
@@ -44,10 +38,7 @@ services:
 
   # ── Streamlit UI ──
   idx-ui:
-    build:
-      context: .
-      args:
-        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: ghcr.io/marvello/my-stocks:latest
     container_name: idx-ui
     restart: unless-stopped
     env_file: .env
