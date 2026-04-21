@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     create_engine, MetaData, Table, Column,
     Integer, Float, String, DateTime, Text,
-    UniqueConstraint, inspect, text
+    UniqueConstraint, ForeignKey, inspect, text
 )
 from dotenv import load_dotenv
 
@@ -81,7 +81,7 @@ stock_snapshots = Table(
 llm_analyses = Table(
     "llm_analyses", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
-    Column("snapshot_id",     Integer, nullable=False),   # FK to stock_snapshots.id
+    Column("snapshot_id",     Integer, ForeignKey("stock_snapshots.id"), nullable=False),
     Column("analysed_at",     DateTime, nullable=False, index=True),
     Column("ticker",          String(10), nullable=False, index=True),
     Column("model",           String(50)),
