@@ -338,6 +338,96 @@ def get_analyses(ticker: str, limit: int = 20) -> list[dict]:
         return [dict(r._mapping) for r in rows]
 
 
+def get_recommendation_accuracy(days_after: int = 3) -> list[dict]:
+    """
+    Compare past recommendations against actual price movement.
+    For each analysis, finds the closest snapshot N days later
+    and computes whether the recommendation was correct.
+
+    Returns list of dicts with: ticker, recommendation, analysed_at,
+    price_at_rec, price_after, actual_change_pct, correct
+    """
+    from sqlalchemy import func, select
+    from datetime import timedelta
+
+    with get_engine().connect() as conn:
+        analyses = conn.execute(
+            llm_analyses.select()
+            .where(llm_analyses.c.recommendation.notin_(["UNKNOWN", ""]))
+            .order_by(llm_analyses.c.analysed_at.desc())
+            .limit(100)
+        ).fetchall()
+
+        results = []
+        for a in analyses:
+            a_dict = dict(a._mapping)
+            ticker = a_dict["ticker"]
+            rec_time = a_dict["analysed_at"]
+            rec = a_dict["recommendation"]
+
+            # Get snapshot at recommendation time
+            snap_at = conn.execute(
+                stock_snapshots.select()
+                .where(stock_snapshots.c.ticker == ticker)
+                .where(stock_snapshots.c.fetched_at <= rec_time)
+                .order_by(stock_snapshots.c.fetched_at.desc())
+                .limit(1)
+            ).fetchone()
+
+            if not snap_at:
+                continue
+
+            price_at = dict(snap_at._mapping).get("current_price")
+            if not price_at:
+                continue
+
+            # Get snapshot N days later
+            target_time = rec_time + timedelta(days=days_after)
+            snap_after = conn.execute(
+                stock_snapshots.select()
+                .where(stock_snapshots.c.ticker == ticker)
+                .where(stock_snapshots.c.fetched_at >= target_time)
+                .order_by(stock_snapshots.c.fetched_at.asc())
+                .limit(1)
+            ).fetchone()
+
+            if not snap_after:
+                continue  # not enough time has passed
+
+            price_after = dict(snap_after._mapping).get("current_price")
+            if not price_after:
+                continue
+
+            change_pct = ((price_after - price_at) / price_at) * 100
+
+            # Determine if recommendation was "correct"
+            bullish = rec in ("BUY", "BUY SEKARANG", "BELI", "AVERAGE DOWN")
+            bearish = rec in ("CUT LOSS", "JUAL", "TRIM", "TAKE PROFIT")
+            neutral = rec in ("HOLD", "TUNGGU", "MONITOR")
+
+            if bullish:
+                correct = change_pct > 0
+            elif bearish:
+                correct = change_pct < 0
+            elif neutral:
+                correct = abs(change_pct) < 5  # within 5% is "correct" for hold
+            else:
+                correct = None
+
+            results.append({
+                "ticker": ticker,
+                "recommendation": rec,
+                "analysed_at": rec_time,
+                "price_at_rec": price_at,
+                "price_after": price_after,
+                "days_after": days_after,
+                "actual_change_pct": round(change_pct, 2),
+                "correct": correct,
+            })
+
+        return results
+
+
 def sync_portfolio_json(path: str):
     """Write active DB positions back to portfolio.json."""
     positions = get_all_positions()

@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, upsert_position, deactivate_position,
                 get_all_positions, get_latest_snapshot, get_latest_analysis,
-                sync_portfolio_json)
+                sync_portfolio_json, get_recommendation_accuracy)
 from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
@@ -79,6 +79,8 @@ def cmd_help(chat_id, _):
         "  <code>/update BMRI 4500 120</code>\n"
         "<b>/remove TICKER</b> — nonaktifkan posisi\n"
         "<b>/analyze TICKER</b> — analisis on-demand\n"
+        "<b>/accuracy [HARI]</b> — akurasi rekomendasi (default: 3 hari)\n"
+        "  <code>/accuracy 7</code>\n"
         "<b>/help</b> — bantuan ini"
     ))
 
@@ -175,12 +177,45 @@ def cmd_analyze(chat_id, args):
     except Exception as e:
         send(chat_id, f"⚠️ Error: <code>{e}</code>")
 
+def cmd_accuracy(chat_id, args):
+    try:
+        days = int(args[0]) if args else 3
+    except ValueError:
+        send(chat_id, "⚠️ Format: <code>/accuracy [HARI]</code>"); return
+    results = get_recommendation_accuracy(days_after=days)
+    if not results:
+        send(chat_id, "📊 Belum cukup data untuk evaluasi akurasi."); return
+
+    correct_count = sum(1 for r in results if r["correct"] is True)
+    total = sum(1 for r in results if r["correct"] is not None)
+    accuracy = (correct_count / total * 100) if total else 0
+
+    lines = [
+        f"<b>📊 Akurasi Rekomendasi ({days} hari)</b>",
+        f"✅ Benar: {correct_count}/{total} ({accuracy:.0f}%)",
+        "",
+    ]
+
+    # Show last 10 results
+    for r in results[:10]:
+        icon = "✅" if r["correct"] else ("❌" if r["correct"] is False else "❓")
+        lines.append(
+            f"{icon} <b>{r['ticker']}</b> {r['recommendation']} "
+            f"→ {r['actual_change_pct']:+.1f}%"
+        )
+
+    if len(results) > 10:
+        lines.append(f"\n<i>... dan {len(results) - 10} lainnya</i>")
+
+    send(chat_id, "\n".join(lines))
+
 COMMANDS = {
     "/help": cmd_help, "/start": cmd_help,
     "/status": cmd_status,
     "/add": cmd_add, "/update": cmd_update,
     "/remove": cmd_remove,
     "/analyze": cmd_analyze,
+    "/accuracy": cmd_accuracy,
 }
 
 def handle_message(message):

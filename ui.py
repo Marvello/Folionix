@@ -12,7 +12,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, get_all_positions, upsert_position, deactivate_position,
                 get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
-                get_snapshots, get_analyses, sync_portfolio_json)
+                get_snapshots, get_analyses, sync_portfolio_json,
+                get_recommendation_accuracy)
 from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
@@ -23,7 +24,7 @@ st.set_page_config(page_title="IDX Portfolio", page_icon="📈", layout="wide")
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 IDX Portfolio")
-page = st.sidebar.radio("Navigation", ["Dashboard", "Positions", "History", "Analysis Log"])
+page = st.sidebar.radio("Navigation", ["Dashboard", "Positions", "History", "Analysis Log", "Accuracy"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def ts_wib(dt):
@@ -219,3 +220,33 @@ elif page == "Analysis Log":
             st.markdown(sanitize_html(a.get("clean_html", "—")), unsafe_allow_html=True)
             if st.toggle("Lihat raw output", key=f"raw_{a['id']}"):
                 st.code(a.get("raw_output", ""), language="html")
+
+
+# ── PAGE: Accuracy ────────────────────────────────────────────────────────────
+elif page == "Accuracy":
+    st.title("📊 Recommendation Accuracy")
+
+    days = st.slider("Evaluasi setelah N hari", 1, 14, 3)
+    results = get_recommendation_accuracy(days_after=days)
+
+    if not results:
+        st.info("Belum cukup data historis untuk evaluasi akurasi.")
+        st.stop()
+
+    correct_count = sum(1 for r in results if r["correct"] is True)
+    total = sum(1 for r in results if r["correct"] is not None)
+    accuracy = (correct_count / total * 100) if total else 0
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Akurasi", f"{accuracy:.0f}%")
+    col2.metric("Benar", f"{correct_count}/{total}")
+    col3.metric("Total Evaluasi", len(results))
+
+    st.divider()
+
+    df = pd.DataFrame(results)
+    df["analysed_at"] = df["analysed_at"].apply(ts_wib)
+    df["correct"] = df["correct"].apply(lambda x: "✅" if x else ("❌" if x is False else "❓"))
+    st.dataframe(df[["ticker", "recommendation", "analysed_at", "price_at_rec",
+                      "price_after", "actual_change_pct", "correct"]],
+                 use_container_width=True, hide_index=True)
