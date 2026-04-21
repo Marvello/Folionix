@@ -1,0 +1,68 @@
+{
+  "_comment": "Edit this file to update your portfolio. avg_price = your average buy price in IDR. lots = number of lots you hold (1 lot = 100 shares). Set active=false to pause a ticker without deleting it.",
+  "positions": [
+    {
+      "ticker": "MDKA",
+      "avg_price": 3064.59,
+      "lots": 11,
+      "active": true,
+      "notes": "Nickel/gold mining, EV supply chain play"
+    },
+    {
+      "ticker": "ADRO",
+      "avg_price": 2213.31,
+      "lots": 2,
+      "active": true,
+      "notes": "Coal + renewables (BREN spinoff), commodity cycle"
+    },
+    {
+      "ticker": "BRMS",
+      "avg_price": 856.28,
+      "lots": 2,
+      "active": true,
+      "notes": "Barito renewables, geothermal/green energy"
+    },
+    {
+      "ticker": "INET",
+      "avg_price": 494.74,
+      "lots": 4,
+      "active": true,
+      "notes": "Indosat data center & telco, deep underwater avg"
+    },
+    {
+      "ticker": "HEAL",
+      "avg_price": 1432.14,
+      "lots": 15,
+      "active": true,
+      "notes": "Mitra Keluarga healthcare, defensive sector"
+    },
+    {
+      "ticker": "BMRI",
+      "avg_price": 4739.46,
+      "lots": 112,
+      "active": true,
+      "notes": "Bank Mandiri, state bank corporate/BUMN"
+    },
+    {
+      "ticker": "ICBP",
+      "avg_price": 8637.93,
+      "lots": 10,
+      "active": true,
+      "notes": "Indofood CBP, FMCG staples, Indomie brand"
+    },
+    {
+      "ticker": "BBRI",
+      "avg_price": 4300.50,
+      "lots": 133,
+      "active": true,
+      "notes": "BRI microfinance & rural banking, state bank"
+    },
+    {
+      "ticker": "BBCA",
+      "avg_price": 8674.55,
+      "lots": 57,
+      "active": true,
+      "notes": "BCA retail banking, digital moat, blue chip"
+    }
+  ]
+}

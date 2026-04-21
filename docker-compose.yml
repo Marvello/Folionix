@@ -1,0 +1,48 @@
+services:
+
+  # ── Scheduled analyzer (run-and-exit, called by cron) ──
+  idx-analyzer:
+    build: .
+    container_name: idx-analyzer
+    restart: "no"
+    env_file: .env
+    environment:
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./portfolio.json:/app/portfolio.json
+      - ./data:/app/data
+    extra_hosts:
+      - "debian-tower:host-gateway"
+
+  # ── Telegram bot (always-on) ──
+  idx-bot:
+    build: .
+    container_name: idx-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./portfolio.json:/app/portfolio.json
+      - ./data:/app/data
+    extra_hosts:
+      - "debian-tower:host-gateway"
+    command: python /app/bot.py
+
+  # ── Streamlit UI ──
+  idx-ui:
+    build: .
+    container_name: idx-ui
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - TZ=Asia/Jakarta
+    volumes:
+      - ./portfolio.json:/app/portfolio.json
+      - ./data:/app/data
+    ports:
+      - "8501:8501"
+    command: streamlit run /app/ui.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    labels:
+      - "com.dockflare.enable=true"
+      - "com.dockflare.hostname=idx-portfolio"
