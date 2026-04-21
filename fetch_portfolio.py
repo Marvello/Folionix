@@ -116,8 +116,11 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
     for attempt in range(MAX_RETRIES):
         try:
             stock = yf.Ticker(symbol)
-            fi    = stock.fast_info
-            info  = stock.info
+            try:
+                fi = stock.fast_info
+            except Exception:
+                fi = None  # fast_info unavailable (delisted/invalid)
+            info  = stock.info or {}
             break
         except Exception as e:
             err_str = str(e)
@@ -133,16 +136,18 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
 
     # ── Price ──
     current = safe_float(
-        info.get("currentPrice") or info.get("regularMarketPrice") or fi.last_price, 0
+        info.get("currentPrice") or info.get("regularMarketPrice")
+        or (fi.last_price if fi else None), 0
     )
     prev = safe_float(
-        info.get("regularMarketPreviousClose") or fi.previous_close, 0
+        info.get("regularMarketPreviousClose")
+        or (fi.previous_close if fi else None), 0
     )
     day_chg     = round(current - prev, 0) if (current and prev) else None
     day_chg_pct = round((day_chg / prev) * 100, 2) if (day_chg and prev) else None
-    high52 = safe_float(info.get("fiftyTwoWeekHigh") or fi.fifty_two_week_high, 0)
-    low52  = safe_float(info.get("fiftyTwoWeekLow")  or fi.fifty_two_week_low,  0)
-    volume = safe_float(info.get("regularMarketVolume") or fi.last_volume, 0)
+    high52 = safe_float(info.get("fiftyTwoWeekHigh") or (fi.fifty_two_week_high if fi else None), 0)
+    low52  = safe_float(info.get("fiftyTwoWeekLow")  or (fi.fifty_two_week_low if fi else None),  0)
+    volume = safe_float(info.get("regularMarketVolume") or (fi.last_volume if fi else None), 0)
 
     # ── P&L vs avg buy price ──
     pnl = pnl_pct = total_pnl = None
