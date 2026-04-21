@@ -40,6 +40,14 @@ def test_extract_recommendation_cut_loss():
 def test_extract_recommendation_average_down():
     assert extract_recommendation("Bisa AVERAGE DOWN di harga ini.") == "AVERAGE DOWN"
 
+def test_extract_recommendation_monitor():
+    assert extract_recommendation("Saat ini MONITOR dulu, tunggu konfirmasi.") == "MONITOR"
+
+def test_extract_recommendation_monitor_not_false_buy():
+    """MONITOR should match before BUY even if template text contains 'Harga Beli'."""
+    text = "Rekomendasi: MONITOR. Harga Beli Rata-rata: Rp 5.000"
+    assert extract_recommendation(text) == "MONITOR"
+
 def test_extract_recommendation_unknown():
     assert extract_recommendation("No clear action here.") == "UNKNOWN"
 

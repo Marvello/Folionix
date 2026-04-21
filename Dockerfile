@@ -15,6 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY fetch_portfolio.py db.py bot.py ui.py utils.py crontab ./
 
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "fetch_portfolio.py"]

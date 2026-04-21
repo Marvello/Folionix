@@ -1,10 +1,33 @@
 """Shared helpers for IDX Portfolio Analyzer."""
 
+import os
 import re
+import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 WIB = timezone(timedelta(hours=7))
+
+_version_cache: str | None = None
+
+
+def get_version() -> str:
+    """Return short git commit hash, cached after first call."""
+    global _version_cache
+    if _version_cache is not None:
+        return _version_cache
+    # Try GIT_COMMIT env var first (set at Docker build time)
+    v = os.getenv("GIT_COMMIT", "").strip()
+    if not v:
+        try:
+            v = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL, text=True
+            ).strip()
+        except Exception:
+            v = "unknown"
+    _version_cache = v
+    return v
 
 
 def safe_float(val, decimals: int = 2) -> Optional[float]:

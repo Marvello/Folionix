@@ -14,7 +14,7 @@ from db import (init_db, get_all_positions, upsert_position, deactivate_position
                 get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
                 get_snapshots, get_analyses, sync_portfolio_json,
                 get_recommendation_accuracy)
-from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html
+from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html, get_version
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
 UI_PASSWORD = os.getenv("UI_PASSWORD", "")
@@ -41,6 +41,7 @@ if UI_PASSWORD:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 IDX Portfolio")
+st.sidebar.caption(f"v {get_version()}")
 page = st.sidebar.radio("Navigation", ["Dashboard", "Positions", "History", "Analysis Log", "Accuracy"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -106,17 +107,33 @@ if page == "Dashboard":
     # Table
     df = pd.DataFrame(rows)
     if not df.empty:
-        df_display = df.copy()
-        df_display["Harga"]       = df_display["Harga"].apply(fmt_idr)
-        df_display["Avg Beli"]    = df_display["Avg Beli"].apply(lambda x: fmt_idr(x, 2))
-        df_display["Invested"]    = df_display["Invested"].apply(fmt_cap)
-        df_display["P&L/lembar"]  = df_display["P&L/lembar"].apply(fmt_idr)
-        df_display["Total P&L"]   = df_display["Total P&L"].apply(
-            lambda x: f"Rp {x:+,.0f}" if x else "—")
-        df_display["P&L %"]       = df_display["P&L %"].apply(
-            lambda x: f"{x:+.2f}%" if x else "—")
+        def color_pnl(val):
+            """Return CSS color for numeric P&L values."""
+            if val is None or val == 0:
+                return ""
+            return "color: #22c55e" if val > 0 else "color: #ef4444"
 
-        st.dataframe(df_display, use_container_width=True, hide_index=True)
+        idr_cols = ["Harga", "Avg Beli", "Invested", "P&L/lembar", "Total P&L"]
+        pnl_cols = ["P&L/lembar", "P&L %", "Total P&L"]
+
+        styled = (
+            df.style
+            .format({
+                "Harga":      lambda x: fmt_idr(x),
+                "Avg Beli":   lambda x: fmt_idr(x, 2),
+                "Invested":   lambda x: fmt_cap(x),
+                "P&L/lembar": lambda x: fmt_idr(x) if x else "—",
+                "Total P&L":  lambda x: f"Rp {x:+,.0f}" if x else "—",
+                "P&L %":      lambda x: f"{x:+.2f}%" if x else "—",
+                "Lots":       lambda x: f"{x:,}",
+            })
+            .map(color_pnl, subset=pnl_cols)
+            .set_properties(subset=idr_cols, **{"text-align": "right"})
+            .set_properties(subset=["Lots"], **{"text-align": "right"})
+            .set_properties(subset=["P&L %"], **{"text-align": "right"})
+        )
+
+        st.dataframe(styled, use_container_width=True, hide_index=True)
 
         # P&L bar chart
         st.subheader("Total P&L per Saham")

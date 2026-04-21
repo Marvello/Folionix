@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db import (init_db, upsert_position, deactivate_position,
                 get_all_positions, get_latest_snapshot, get_latest_analysis,
                 sync_portfolio_json, get_recommendation_accuracy)
-from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl
+from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, get_version
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
@@ -266,7 +266,7 @@ def main():
         log.error("TELEGRAM_TOKEN not set"); sys.exit(1)
     init_db()
     log.info(f"Bot started. Allowed chat_id={ALLOWED_CHAT_ID}")
-    send(ALLOWED_CHAT_ID, "🤖 <b>IDX Portfolio Bot online.</b> Ketik /help.")
+    send(ALLOWED_CHAT_ID, f"🤖 <b>IDX Portfolio Bot online.</b> v{get_version()} | Ketik /help.")
     offset = 0
     while True:
         try:
