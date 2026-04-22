@@ -44,7 +44,7 @@ if UI_PASSWORD:
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 st.sidebar.title("📈 IDX Portfolio")
 st.sidebar.caption(f"[v {get_version()}]({get_version_url()})")
-page = st.sidebar.radio("Navigation", ["Dashboard", "Watchlist", "Positions", "History", "Analysis Log", "Accuracy"])
+page = st.sidebar.radio("Navigation", ["Dashboard", "Watchlist", "History", "Analysis Log", "Accuracy"])
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def ts_wib(dt):
@@ -61,86 +61,130 @@ if page == "Dashboard":
 
     if not snaps:
         st.info("Belum ada data. Jalankan fetch_portfolio.py terlebih dahulu.")
-        st.stop()
 
-    # Summary cards
-    total_inv = total_pnl = 0
-    rows = []
-    for s in snaps:
-        ticker = s["ticker"]
-        pos    = positions.get(ticker, {})
-        avg    = pos.get("avg_price") or s.get("avg_price") or 0
-        lots   = pos.get("lots") or s.get("lots") or 0
-        price  = s.get("current_price") or 0
-        analysis = get_latest_analysis(ticker)
-        rec    = (analysis.get("recommendation") or "—") if analysis else "—"
+    if snaps:
+        # Summary cards
+        total_inv = total_pnl = 0
+        rows = []
+        for s in snaps:
+            ticker = s["ticker"]
+            pos    = positions.get(ticker, {})
+            avg    = pos.get("avg_price") or s.get("avg_price") or 0
+            lots   = pos.get("lots") or s.get("lots") or 0
+            price  = s.get("current_price") or 0
+            analysis = get_latest_analysis(ticker)
+            rec    = (analysis.get("recommendation") or "—") if analysis else "—"
 
-        if avg and lots and price:
-            p = calc_pnl(price, avg, lots)
-            total_inv  += p["invested"]
-            total_pnl  += p["total_pnl"]
-        else:
-            p = {"pnl": 0, "pnl_pct": 0, "total_pnl": 0, "invested": 0}
+            if avg and lots and price:
+                p = calc_pnl(price, avg, lots)
+                total_inv  += p["invested"]
+                total_pnl  += p["total_pnl"]
+            else:
+                p = {"pnl": 0, "pnl_pct": 0, "total_pnl": 0, "invested": 0}
 
-        rows.append({
-            "Ticker":       ticker,
-            "Harga":        price,
-            "Avg Beli":     avg,
-            "Lots":         lots,
-            "Invested":     p["invested"],
-            "P&L/lembar":   p["pnl"],
-            "P&L %":        p["pnl_pct"],
-            "Total P&L":    p["total_pnl"],
-            "Rekomendasi":  rec,
-            "Update":       ts_wib(s.get("fetched_at")),
-        })
-
-    # Top summary
-    col1, col2, col3 = st.columns(3)
-    total_pct = (total_pnl / total_inv * 100) if total_inv else 0
-    col1.metric("Total Investasi", fmt_cap(total_inv))
-    col2.metric("Total P&L", fmt_cap(abs(total_pnl)),
-                f"{'+' if total_pnl >= 0 else ''}{total_pct:.2f}%",
-                delta_color="normal" if total_pnl >= 0 else "inverse")
-    col3.metric("Jumlah Posisi", len(rows))
-
-    st.divider()
-
-    # Table
-    df = pd.DataFrame(rows)
-    if not df.empty:
-        def color_pnl(val):
-            """Return CSS color for numeric P&L values."""
-            if val is None or val == 0:
-                return ""
-            return "color: #22c55e" if val > 0 else "color: #ef4444"
-
-        idr_cols = ["Harga", "Avg Beli", "Invested", "P&L/lembar", "Total P&L"]
-        pnl_cols = ["P&L/lembar", "P&L %", "Total P&L"]
-
-        styled = (
-            df.style
-            .format({
-                "Harga":      lambda x: fmt_idr(x),
-                "Avg Beli":   lambda x: fmt_idr(x, 2),
-                "Invested":   lambda x: fmt_cap(x),
-                "P&L/lembar": lambda x: fmt_idr(x) if x else "—",
-                "Total P&L":  lambda x: f"Rp {x:+,.0f}" if x else "—",
-                "P&L %":      lambda x: f"{x:+.2f}%" if x else "—",
-                "Lots":       lambda x: f"{x:,}",
+            rows.append({
+                "Ticker":       ticker,
+                "Harga":        price,
+                "Avg Beli":     avg,
+                "Lots":         lots,
+                "Invested":     p["invested"],
+                "P&L/lembar":   p["pnl"],
+                "P&L %":        p["pnl_pct"],
+                "Total P&L":    p["total_pnl"],
+                "Rekomendasi":  rec,
+                "Update":       ts_wib(s.get("fetched_at")),
             })
-            .map(color_pnl, subset=pnl_cols)
-            .set_properties(subset=idr_cols, **{"text-align": "right"})
-            .set_properties(subset=["Lots"], **{"text-align": "right"})
-            .set_properties(subset=["P&L %"], **{"text-align": "right"})
-        )
 
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        # Top summary
+        col1, col2, col3 = st.columns(3)
+        total_pct = (total_pnl / total_inv * 100) if total_inv else 0
+        col1.metric("Total Investasi", fmt_cap(total_inv))
+        col2.metric("Total P&L", fmt_cap(abs(total_pnl)),
+                    f"{'+' if total_pnl >= 0 else ''}{total_pct:.2f}%",
+                    delta_color="normal" if total_pnl >= 0 else "inverse")
+        col3.metric("Jumlah Posisi", len(rows))
 
-        # P&L bar chart
-        st.subheader("Total P&L per Saham")
-        chart_df = df[["Ticker", "Total P&L"]].set_index("Ticker")
-        st.bar_chart(chart_df)
+        st.divider()
+
+        # Table
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            def color_pnl(val):
+                """Return CSS color for numeric P&L values."""
+                if val is None or val == 0:
+                    return ""
+                return "color: #22c55e" if val > 0 else "color: #ef4444"
+
+            idr_cols = ["Harga", "Avg Beli", "Invested", "P&L/lembar", "Total P&L"]
+            pnl_cols = ["P&L/lembar", "P&L %", "Total P&L"]
+
+            styled = (
+                df.style
+                .format({
+                    "Harga":      lambda x: fmt_idr(x),
+                    "Avg Beli":   lambda x: fmt_idr(x, 2),
+                    "Invested":   lambda x: fmt_cap(x),
+                    "P&L/lembar": lambda x: fmt_idr(x) if x else "—",
+                    "Total P&L":  lambda x: f"Rp {x:+,.0f}" if x else "—",
+                    "P&L %":      lambda x: f"{x:+.2f}%" if x else "—",
+                    "Lots":       lambda x: f"{x:,}",
+                })
+                .map(color_pnl, subset=pnl_cols)
+                .set_properties(subset=idr_cols, **{"text-align": "right"})
+                .set_properties(subset=["Lots"], **{"text-align": "right"})
+                .set_properties(subset=["P&L %"], **{"text-align": "right"})
+            )
+
+            st.dataframe(styled, use_container_width=True, hide_index=True)
+
+            # P&L bar chart
+            st.subheader("Total P&L per Saham")
+            chart_df = df[["Ticker", "Total P&L"]].set_index("Ticker")
+            st.bar_chart(chart_df)
+
+    # ── Kelola Posisi ─────────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🗂️ Kelola Posisi")
+
+    if positions:
+        for pos in positions.values():
+            with st.expander(f"**{pos['ticker']}** — {pos['lots']} lot @ {fmt_idr(pos['avg_price'], 2)}"):
+                ec1, ec2, ec3 = st.columns(3)
+                new_avg   = ec1.number_input("Avg Price (Rp)", value=float(pos["avg_price"]),
+                                              step=1.0, key=f"dash_avg_{pos['ticker']}")
+                new_lots  = ec2.number_input("Lots", value=int(pos["lots"]),
+                                              step=1,   key=f"dash_lots_{pos['ticker']}")
+                new_notes = ec3.text_input("Notes", value=pos.get("notes", ""),
+                                            key=f"dash_notes_{pos['ticker']}")
+                bc1, bc2 = st.columns([1, 4])
+                if bc1.button("💾 Simpan", key=f"dash_save_{pos['ticker']}"):
+                    upsert_position(pos["ticker"], new_avg, new_lots, new_notes)
+                    sync_portfolio_json(PORTFOLIO_FILE)
+                    st.success(f"✅ {pos['ticker']} diperbarui.")
+                    st.rerun()
+                if bc2.button("🗑️ Nonaktifkan", key=f"dash_del_{pos['ticker']}"):
+                    deactivate_position(pos["ticker"])
+                    sync_portfolio_json(PORTFOLIO_FILE)
+                    st.warning(f"⚠️ {pos['ticker']} dinonaktifkan.")
+                    st.rerun()
+
+    st.subheader("➕ Tambah Posisi Baru")
+    nc1, nc2, nc3, nc4 = st.columns(4)
+    new_ticker = nc1.text_input("Ticker", placeholder="BBCA", key="dash_new_ticker").upper()
+    new_avg    = nc2.number_input("Avg Price (Rp)", min_value=0.0, step=1.0, key="dash_new_avg")
+    new_lots   = nc3.number_input("Lots", min_value=0, step=1, key="dash_new_lots")
+    new_notes  = nc4.text_input("Notes", placeholder="Optional", key="dash_new_notes")
+
+    if st.button("➕ Tambah", key="dash_add_btn"):
+        if not new_ticker or not re.match(r"^[A-Z0-9]{1,10}$", new_ticker):
+            st.error("Ticker tidak valid (1-10 huruf/angka).")
+        elif new_avg <= 0 or new_lots <= 0:
+            st.error("Avg Price dan Lots harus > 0.")
+        else:
+            upsert_position(new_ticker, new_avg, int(new_lots), new_notes)
+            sync_portfolio_json(PORTFOLIO_FILE)
+            st.success(f"✅ {new_ticker} ditambahkan.")
+            st.rerun()
 
 
 # ── PAGE: Watchlist ──────────────────────────────────────────────────────────
@@ -279,59 +323,6 @@ elif page == "Watchlist":
             else:
                 st.error(res["message"])
 
-
-# ── PAGE: Positions (CRUD) ────────────────────────────────────────────────────
-elif page == "Positions":
-    st.title("🗂️ Manage Positions")
-
-    positions = get_all_positions()
-
-    # Edit existing
-    st.subheader("Posisi Aktif")
-    if positions:
-        for pos in positions:
-            with st.expander(f"**{pos['ticker']}** — {pos['lots']} lot @ {fmt_idr(pos['avg_price'], 2)}"):
-                col1, col2, col3 = st.columns(3)
-                new_avg  = col1.number_input("Avg Price (Rp)", value=float(pos["avg_price"]),
-                                              step=1.0, key=f"avg_{pos['ticker']}")
-                new_lots = col2.number_input("Lots", value=int(pos["lots"]),
-                                              step=1, key=f"lots_{pos['ticker']}")
-                new_notes= col3.text_input("Notes", value=pos.get("notes",""),
-                                            key=f"notes_{pos['ticker']}")
-                c1, c2 = st.columns([1, 4])
-                if c1.button("💾 Simpan", key=f"save_{pos['ticker']}"):
-                    upsert_position(pos["ticker"], new_avg, new_lots, new_notes)
-                    sync_portfolio_json(PORTFOLIO_FILE)
-                    st.success(f"✅ {pos['ticker']} diperbarui.")
-                    st.rerun()
-                if c2.button("🗑️ Nonaktifkan", key=f"del_{pos['ticker']}"):
-                    deactivate_position(pos["ticker"])
-                    sync_portfolio_json(PORTFOLIO_FILE)
-                    st.warning(f"⚠️ {pos['ticker']} dinonaktifkan.")
-                    st.rerun()
-    else:
-        st.info("Belum ada posisi aktif.")
-
-    st.divider()
-
-    # Add new
-    st.subheader("➕ Tambah Posisi Baru")
-    col1, col2, col3, col4 = st.columns(4)
-    new_ticker = col1.text_input("Ticker", placeholder="BBCA").upper()
-    new_avg    = col2.number_input("Avg Price (Rp)", min_value=0.0, step=1.0)
-    new_lots   = col3.number_input("Lots", min_value=0, step=1)
-    new_notes  = col4.text_input("Notes", placeholder="Optional")
-
-    if st.button("➕ Tambah"):
-        if not new_ticker or not re.match(r"^[A-Z0-9]{1,10}$", new_ticker):
-            st.error("Ticker tidak valid (1-10 huruf/angka).")
-        elif new_avg <= 0 or new_lots <= 0:
-            st.error("Avg Price dan Lots harus > 0.")
-        else:
-            upsert_position(new_ticker, new_avg, new_lots, new_notes)
-            sync_portfolio_json(PORTFOLIO_FILE)
-            st.success(f"✅ {new_ticker} ditambahkan.")
-            st.rerun()
 
 
 # ── PAGE: History ─────────────────────────────────────────────────────────────
