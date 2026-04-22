@@ -111,8 +111,39 @@ portfolio_positions = Table(
 )
 
 
+_DEFAULT_PORTFOLIO = {
+    "_comment": (
+        "Edit this file to update your portfolio. avg_price = your average buy price in IDR. "
+        "lots = number of lots you hold (1 lot = 100 shares). Set active=false to pause a ticker without deleting it."
+    ),
+    "positions": [],
+}
+
+_DEFAULT_WATCHLIST = {
+    "_comment": "Watchlist — mutually exclusive with portfolio.json. user = manually added. ai_suggested = AI-recommended based on portfolio context.",
+    "user": [],
+    "ai_suggested": [],
+}
+
+_JSON_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "json")
+
+
+def _ensure_data_files() -> None:
+    os.makedirs(_JSON_DIR, exist_ok=True)
+    for filename, default in (
+        ("portfolio.json", _DEFAULT_PORTFOLIO),
+        ("watchlist.json", _DEFAULT_WATCHLIST),
+    ):
+        path = os.path.join(_JSON_DIR, filename)
+        if not os.path.exists(path):
+            with open(path, "w") as f:
+                json.dump(default, f, indent=2)
+            print(f"  📄 Created {filename}")
+
+
 def init_db():
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist and ensure data files exist."""
+    _ensure_data_files()
     e = get_engine()
     metadata.create_all(e)
     print(f"  💾 DB ready: {e.url}")
