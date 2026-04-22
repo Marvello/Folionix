@@ -32,6 +32,7 @@ from app.db import (init_db, upsert_position, deactivate_position,
                     get_all_positions, get_latest_snapshot, get_latest_analysis,
                     sync_portfolio_json, get_recommendation_accuracy)
 from app.utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, get_version, get_version_url
+from app import watchlist as wl_mod
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
@@ -86,6 +87,9 @@ def cmd_help(chat_id, _):
         "<b>/portfolio</b> — export semua posisi\n"
         "<b>/accuracy [HARI]</b> — akurasi rekomendasi (default: 3 hari)\n"
         "  <code>/accuracy 7</code>\n"
+        "<b>/wadd TICKER [notes]</b> — tambah ke watchlist\n"
+        "<b>/wremove TICKER</b> — hapus dari watchlist\n"
+        "<b>/wlist</b> — lihat watchlist\n"
         "<b>/help</b> — bantuan ini"
     ))
 
@@ -246,46 +250,72 @@ def cmd_suggest(chat_id, args):
         count = int(args[0]) if args else 5
         count = max(1, min(count, 10))
     except ValueError:
-        send(chat_id, "⚠️ Format: <code>/suggest [N]</code> — e.g. <code>/suggest 5</code>"); return
+        send(chat_id, "⚠️ Format: <code>/suggest [N]</code>"); return
 
-    send(chat_id, f"🤖 Asking AI for {count} stock suggestions… this may take a minute.")
-    try:
-        result = subprocess.run(
-            ["python", "scripts/watchlist_manager.py", "suggest", "--count", str(count)],
-            capture_output=True, text=True, timeout=300,
-            cwd=os.path.dirname(os.path.dirname(__file__)),
-        )
-        if result.returncode != 0:
-            log.error(f"suggest failed: {result.stderr[-300:]}")
-            send(chat_id, "⚠️ AI suggestion failed. Check server log."); return
-    except subprocess.TimeoutExpired:
-        send(chat_id, "⚠️ Timed out waiting for AI suggestions."); return
-    except Exception as e:
-        log.error(f"cmd_suggest exception: {e}", exc_info=True)
-        send(chat_id, "⚠️ Internal error. Check server log."); return
+    send(chat_id, f"🤖 Meminta {count} saran saham dari AI… mungkin perlu 1-2 menit.")
+    result = wl_mod.suggest(count)
 
-    # Read updated watchlist and format results
-    import json as _json
-    from pathlib import Path
-    wl_path = Path(os.path.dirname(os.path.dirname(__file__))) / "data" / "json" / "watchlist.json"
-    try:
-        wl = _json.loads(wl_path.read_text())
-    except Exception:
-        send(chat_id, "⚠️ Could not read watchlist.json after suggestion."); return
+    if not result["ok"]:
+        send(chat_id, f"⚠️ {result['message']}"); return
 
-    suggestions = wl.get("ai_suggested", [])
+    suggestions = result["suggestions"]
     if not suggestions:
-        send(chat_id, "🤷 AI returned no suggestions this time. Try again."); return
+        send(chat_id, "🤷 AI tidak menghasilkan saran kali ini. Coba lagi."); return
 
     lines = [f"<b>🤖 AI Watchlist Suggestions ({len(suggestions)} stocks)</b>\n"]
     for i, s in enumerate(suggestions, 1):
-        ticker = s.get("ticker", "?")
-        sector = s.get("sector", "")
-        rationale = s.get("rationale", "")
-        lines.append(f"<b>{i}. {ticker}</b> <i>[{sector}]</i>")
-        if rationale:
-            lines.append(f"   {rationale}")
-    lines.append("\n<i>Added to watchlist. Use /analyze TICKER or run watchlist analysis for details.</i>")
+        lines.append(f"<b>{i}. {s['ticker']}</b> <i>[{s.get('sector', '')}]</i>")
+        if s.get("rationale"):
+            lines.append(f"   {s['rationale']}")
+    lines.append("\n<i>Ditambahkan ke watchlist. Gunakan /wlist untuk melihat.</i>")
+    send(chat_id, "\n".join(lines))
+
+
+def cmd_wadd(chat_id, args):
+    if not args:
+        send(chat_id, "⚠️ Format: <code>/wadd TICKER [notes]</code>"); return
+    ticker = sanitize_ticker(args[0])
+    if not ticker:
+        send(chat_id, "⚠️ Ticker tidak valid."); return
+    notes = " ".join(args[1:])
+    result = wl_mod.add_ticker(ticker, notes)
+    icon = "✅" if result["ok"] else "⚠️"
+    send(chat_id, f"{icon} {result['message']}")
+
+
+def cmd_wremove(chat_id, args):
+    if not args:
+        send(chat_id, "⚠️ Format: <code>/wremove TICKER</code>"); return
+    ticker = sanitize_ticker(args[0])
+    if not ticker:
+        send(chat_id, "⚠️ Ticker tidak valid."); return
+    result = wl_mod.remove_ticker(ticker)
+    icon = "✅" if result["ok"] else "⚠️"
+    send(chat_id, f"{icon} {result['message']}")
+
+
+def cmd_wlist(chat_id, _):
+    wl = wl_mod.load_watchlist()
+    user_list = wl.get("user", [])
+    ai_list   = wl.get("ai_suggested", [])
+
+    if not user_list and not ai_list:
+        send(chat_id, "📋 Watchlist kosong."); return
+
+    lines = ["<b>👀 Watchlist</b>\n"]
+
+    if user_list:
+        lines.append("<b>👤 User-added:</b>")
+        for e in user_list:
+            note = f"  <i>{e['notes']}</i>" if e.get("notes") else ""
+            lines.append(f"  • <b>{e['ticker']}</b>{note}")
+
+    if ai_list:
+        lines.append("\n<b>🤖 AI-suggested:</b>")
+        for e in ai_list:
+            rat = f"  <i>{e['rationale'][:80]}</i>" if e.get("rationale") else ""
+            lines.append(f"  • <b>{e['ticker']}</b> [{e.get('sector', '')}]{rat}")
+
     send(chat_id, "\n".join(lines))
 
 
@@ -319,6 +349,9 @@ COMMANDS = {
     "/suggest": cmd_suggest,
     "/portfolio": cmd_portfolio,
     "/accuracy": cmd_accuracy,
+    "/wadd":    cmd_wadd,
+    "/wremove": cmd_wremove,
+    "/wlist":   cmd_wlist,
 }
 
 def handle_message(message):
@@ -352,6 +385,9 @@ def register_commands():
         {"command": "suggest", "description": "AI watchlist suggestions: /suggest [N]"},
         {"command": "portfolio", "description": "Export all positions"},
         {"command": "accuracy", "description": "Recommendation accuracy: /accuracy [DAYS]"},
+        {"command": "wadd",    "description": "Tambah ke watchlist: /wadd TICKER [notes]"},
+        {"command": "wremove", "description": "Hapus dari watchlist: /wremove TICKER"},
+        {"command": "wlist",   "description": "Lihat watchlist"},
         {"command": "help", "description": "Show help"},
     ]
     try:
