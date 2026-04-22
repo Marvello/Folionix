@@ -27,9 +27,9 @@ from typing import Optional
 import yfinance as yf
 import requests
 from dotenv import load_dotenv
-from db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis, get_snapshots
-from utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
-                   WIB, now_wib, fmt_wib, get_version, get_version_url)
+from app.db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis, get_snapshots
+from app.utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
+                       WIB, now_wib, fmt_wib, get_version, get_version_url)
 
 load_dotenv()
 
@@ -44,7 +44,7 @@ OLLAMA_MODEL     = os.getenv("OLLAMA_MODEL",    "qwen2.5:7b")
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN",  "YOUR_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","YOUR_CHAT_ID")
 SEND_TELEGRAM    = os.getenv("SEND_TELEGRAM",   "true").lower() == "true"
-PORTFOLIO_FILE   = os.getenv("PORTFOLIO_FILE",  "portfolio.json")
+PORTFOLIO_FILE   = os.getenv("PORTFOLIO_FILE",  "data/json/portfolio.json")
 CACHE_MINUTES    = int(os.getenv("CACHE_MINUTES", "30"))
 
 
@@ -53,7 +53,8 @@ CACHE_MINUTES    = int(os.getenv("CACHE_MINUTES", "30"))
 # ──────────────────────────────────────────────
 def load_portfolio() -> dict:
     """Load positions from portfolio.json. Returns {TICKER: {avg_price, lots, notes}}."""
-    path = os.path.join(os.path.dirname(__file__), PORTFOLIO_FILE)
+    # Resolve relative to project root (parent of app/)
+    path = os.path.join(os.path.dirname(os.path.dirname(__file__)), PORTFOLIO_FILE)
     if not os.path.exists(path):
         raise FileNotFoundError(f"Portfolio file not found: {path}")
     with open(path) as f:

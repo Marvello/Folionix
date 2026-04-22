@@ -4,19 +4,19 @@ ui.py — Streamlit dashboard for IDX Portfolio Analyzer
 Run: streamlit run ui.py --server.port 8501
 """
 
-import os, sys, json
+import json
+import os
 from datetime import datetime
 import streamlit as st
 import pandas as pd
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from db import (init_db, get_all_positions, upsert_position, deactivate_position,
-                get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
-                get_snapshots, get_analyses, sync_portfolio_json,
-                get_recommendation_accuracy)
-from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html, get_version, get_version_url
+from app.db import (init_db, get_all_positions, upsert_position, deactivate_position,
+                    get_latest_snapshot, get_latest_analysis, get_all_latest_snapshots,
+                    get_snapshots, get_analyses, sync_portfolio_json,
+                    get_recommendation_accuracy)
+from app.utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html, get_version, get_version_url
 
-PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
+PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "data/json/portfolio.json")
 UI_PASSWORD = os.getenv("UI_PASSWORD", "")
 
 init_db()
@@ -149,10 +149,10 @@ elif page == "Watchlist":
     import json as _json
     from pathlib import Path as _Path
 
-    _wl_path = _Path(os.getenv("WATCHLIST_FILE", "/app/watchlist.json"))
+    _wl_path = _Path(os.getenv("WATCHLIST_FILE", "data/json/watchlist.json"))
     if not _wl_path.exists():
-        # Try local path
-        _wl_path = _Path(os.path.dirname(os.path.abspath(__file__))) / "watchlist.json"
+        # Try path relative to project root
+        _wl_path = _Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "data" / "json" / "watchlist.json"
 
     if not _wl_path.exists():
         st.info("Belum ada watchlist. Buat watchlist.json terlebih dahulu.")

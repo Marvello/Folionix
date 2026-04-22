@@ -17,17 +17,16 @@ load_dotenv()
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-PORTFOLIO_FILE   = os.getenv("PORTFOLIO_FILE", "/app/portfolio.json")
+PORTFOLIO_FILE   = os.getenv("PORTFOLIO_FILE", "data/json/portfolio.json")
 ALLOWED_CHAT_ID  = str(TELEGRAM_CHAT_ID)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from db import (init_db, upsert_position, deactivate_position,
-                get_all_positions, get_latest_snapshot, get_latest_analysis,
-                sync_portfolio_json, get_recommendation_accuracy)
-from utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, get_version, get_version_url
+from app.db import (init_db, upsert_position, deactivate_position,
+                    get_all_positions, get_latest_snapshot, get_latest_analysis,
+                    sync_portfolio_json, get_recommendation_accuracy)
+from app.utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, get_version, get_version_url
 
 BASE = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
 
@@ -191,7 +190,7 @@ def cmd_analyze(chat_id, args):
     send(chat_id, f"⏳ Menganalisis <b>{ticker}</b>...")
     try:
         result = subprocess.run(
-            ["python", "/app/fetch_portfolio.py", ticker],
+            ["python", "-m", "app.fetch_portfolio", ticker],
             capture_output=True, text=True, timeout=180
         )
         if result.returncode != 0:

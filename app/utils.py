@@ -1,8 +1,10 @@
 """Shared helpers for IDX Portfolio Analyzer."""
 
+import json
 import os
 import re
 import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -118,3 +120,13 @@ def fmt_wib(dt: datetime) -> str:
 def sanitize_html(html: str) -> str:
     """Strip all HTML tags except b, i, code."""
     return re.sub(r"<(?!\/?(?:b|i|code)(?:\s[^>]*)?>)[^>]+>", "", html)
+
+
+def write_json_atomic(path: str, data: dict) -> None:
+    """Write JSON atomically to prevent corruption on crash."""
+    dir_name = os.path.dirname(path) or "."
+    with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, suffix=".tmp") as tmp:
+        json.dump(data, tmp, indent=2, ensure_ascii=False)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    os.replace(tmp.name, path)

@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+WORKDIR /project
 
 # Install supercronic (cron for containers, no root daemon needed)
 # Install curl (kept for healthchecks) + supercronic
@@ -13,11 +13,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY fetch_portfolio.py db.py bot.py ui.py utils.py crontab \
-     analyze_watchlist.py watchlist_manager.py ./
+# Copy application code
+COPY app/ ./app/
+COPY scripts/ ./scripts/
+COPY docker/crontab ./crontab
+
+# Ensure data directories exist
+RUN mkdir -p data/json
 
 ARG GIT_COMMIT=unknown
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "fetch_portfolio.py"]
+CMD ["python", "-m", "app.fetch_portfolio"]

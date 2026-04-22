@@ -1,7 +1,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from fetch_portfolio import clean_for_telegram, extract_recommendation, build_prompt
+from app.fetch_portfolio import clean_for_telegram, extract_recommendation, build_prompt
 
 def test_clean_strips_markdown_fences():
     raw = "```html\n<b>Hello</b>\n```"

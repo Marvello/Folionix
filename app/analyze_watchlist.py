@@ -24,9 +24,9 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-from db import init_db, save_snapshot, save_analysis, get_latest_analysis
-from fetch_portfolio import fetch_stock, clean_for_telegram, call_ollama
-from utils import (
+from app.db import init_db, save_snapshot, save_analysis, get_latest_analysis
+from app.fetch_portfolio import fetch_stock, clean_for_telegram, call_ollama
+from app.utils import (
     fmt_idr, fmt_cap, safe_float, normalize_ticker,
     now_wib, get_version, get_version_url,
 )
@@ -42,8 +42,8 @@ TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SEND_TELEGRAM    = os.getenv("SEND_TELEGRAM", "true").lower() == "true"
 
-BASE_DIR       = Path(__file__).parent
-WATCHLIST_FILE = BASE_DIR / "watchlist.json"
+BASE_DIR       = Path(__file__).parent.parent  # project root
+WATCHLIST_FILE = BASE_DIR / "data" / "json" / "watchlist.json"
 
 
 # ── Telegram (reuse pattern from fetch_portfolio) ────────────────────────────

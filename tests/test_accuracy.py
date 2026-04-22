@@ -4,8 +4,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 os.environ["DATABASE_URL"] = "sqlite://"
 
 from datetime import datetime, timezone, timedelta
-from db import (init_db, save_snapshot, save_analysis, get_recommendation_accuracy,
-                get_engine, metadata)
+from app.db import (init_db, save_snapshot, save_analysis, get_recommendation_accuracy,
+                    get_engine, metadata)
 
 
 def setup_function():

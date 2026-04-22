@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # Use in-memory SQLite for tests
 os.environ["DATABASE_URL"] = "sqlite://"
 
-from db import (
+from app.db import (
     init_db, upsert_position, deactivate_position,
     get_all_positions, get_all_latest_snapshots,
     get_analyses, sync_portfolio_json,

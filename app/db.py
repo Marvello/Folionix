@@ -4,7 +4,7 @@ db.py — Database layer for IDX Portfolio Analyzer
 Uses SQLAlchemy Core so swapping SQLite → Postgres
 is a single env var change:
 
-  SQLite  (default): DATABASE_URL=sqlite:///./idx_portfolio.db
+  SQLite  (default): DATABASE_URL=sqlite:///./data/app.db
   Postgres (later) : DATABASE_URL=postgresql://user:pass@host:5432/idx_portfolio
 """
 
@@ -28,7 +28,7 @@ engine = None
 def get_engine():
     global engine
     if engine is None:
-        db_url = os.getenv("DATABASE_URL", "sqlite:///./data/idx_portfolio.db")
+        db_url = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
         connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
         engine = create_engine(db_url, connect_args=connect_args, echo=False)
         # Enable WAL mode for SQLite — allows concurrent reads during writes
@@ -429,7 +429,8 @@ def get_recommendation_accuracy(days_after: int = 3) -> list[dict]:
 
 
 def sync_portfolio_json(path: str):
-    """Write active DB positions back to portfolio.json."""
+    """Write active DB positions back to portfolio.json (atomic write)."""
+    from app.utils import write_json_atomic
     positions = get_all_positions()
     data = {
         "_comment": "Auto-synced from database.",
@@ -444,5 +445,4 @@ def sync_portfolio_json(path: str):
             for p in positions
         ],
     }
-    with open(path, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    write_json_atomic(path, data)

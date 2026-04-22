@@ -31,9 +31,9 @@ log = logging.getLogger(__name__)
 OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
 
-BASE_DIR       = Path(__file__).parent
-WATCHLIST_FILE = BASE_DIR / "watchlist.json"
-PORTFOLIO_FILE = BASE_DIR / "portfolio.json"
+BASE_DIR       = Path(__file__).parent.parent  # project root
+WATCHLIST_FILE = BASE_DIR / "data" / "json" / "watchlist.json"
+PORTFOLIO_FILE = BASE_DIR / "data" / "json" / "portfolio.json"
 
 
 # ── I/O helpers ──────────────────────────────────────────────────────────────
@@ -45,8 +45,14 @@ def load_watchlist() -> dict:
 
 
 def save_watchlist(data: dict) -> None:
-    """Save watchlist to JSON file."""
-    WATCHLIST_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    """Save watchlist to JSON file (atomic write)."""
+    import tempfile
+    dir_name = str(WATCHLIST_FILE.parent)
+    with tempfile.NamedTemporaryFile("w", dir=dir_name, delete=False, suffix=".tmp") as tmp:
+        json.dump(data, tmp, indent=2, ensure_ascii=False)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+    os.replace(tmp.name, str(WATCHLIST_FILE))
 
 
 def load_portfolio_tickers() -> list[str]:

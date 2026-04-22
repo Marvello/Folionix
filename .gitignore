@@ -8,9 +8,10 @@ venv/
 # Secrets
 .env
 
-# Data
-data/
+# Data (track JSON configs, ignore DB)
+data/*.db
 *.db
+!data/json/
 
 # OS
 .DS_Store

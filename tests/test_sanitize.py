@@ -1,8 +1,8 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from bot import sanitize_ticker
-from utils import sanitize_html
+from app.bot import sanitize_ticker
+from app.utils import sanitize_html
 
 def test_sanitize_ticker_valid():
     assert sanitize_ticker("BBCA") == "BBCA"
