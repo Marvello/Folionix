@@ -30,7 +30,7 @@ from dotenv import load_dotenv
 from app.db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis, get_snapshots
 from app.utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
                        WIB, now_wib, fmt_wib, get_version, get_version_url,
-                       validate_portfolio_json)
+                       validate_portfolio_json, color_pnl)
 
 load_dotenv()
 
@@ -163,12 +163,12 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
         pnl       = round(current - avg_price, 0)           # per share
         pnl_pct   = round((pnl / avg_price) * 100, 2)
         total_pnl = round(pnl * lots * 100, 0)              # lots × 100 shares/lot
-        if   pnl_pct >=  10: position_status = "🟢 PROFIT SIGNIFIKAN"
+        if   pnl_pct >=  10: position_status = "🟢 BIG PROFIT"
         elif pnl_pct >=   2: position_status = "🟢 PROFIT"
-        elif pnl_pct >=  -2: position_status = "⚪ BREAKEVEN ZONE"
-        elif pnl_pct >= -10: position_status = "🟡 RUGI TIPIS"
-        elif pnl_pct >= -20: position_status = "🔴 RUGI"
-        else:                position_status = "🔴 RUGI DALAM"
+        elif pnl_pct >=  -2: position_status = "⚪ BREAKEVEN"
+        elif pnl_pct >= -10: position_status = "🟡 SMALL LOSS"
+        elif pnl_pct >= -20: position_status = "🔴 LOSS"
+        else:                position_status = "🔴 DEEP LOSS"
 
     dist_high = round((current/high52 - 1)*100, 1) if (current and high52) else None
     dist_low  = round((current/low52  - 1)*100, 1) if (current and low52)  else None
@@ -242,14 +242,14 @@ def build_prompt(d: dict, history: list[dict] | None = None) -> str:
     minute = now.minute
 
     # Session context
-    if   hour == 9  and minute == 0:  session = "PEMBUKAAN SESI 1 (09:00)"
-    elif hour == 10:                   session = "SESI 1 — 10:00 WIB"
-    elif hour == 11:                   session = "SESI 1 — 11:00 WIB (1 jam menuju tutup)"
-    elif hour == 12:                   session = "PENUTUPAN SESI 1 (12:00)"
-    elif hour == 13:                   session = "PEMBUKAAN SESI 2 (13:30)"
-    elif hour == 14 and minute >= 30:  session = "SESI 2 — 14:30 WIB (30 mnt menuju penutupan ⚠️)"
-    elif hour == 15:                   session = "PENUTUPAN PASAR (15:00)"
-    else:                              session = f"UPDATE PORTOFOLIO ({hour:02d}:{minute:02d} WIB)"
+    if   hour == 9  and minute == 0:  session = "SESSION 1 OPEN (09:00)"
+    elif hour == 10:                   session = "SESSION 1 — 10:00 WIB"
+    elif hour == 11:                   session = "SESSION 1 — 11:00 WIB (1 hr to close)"
+    elif hour == 12:                   session = "SESSION 1 CLOSE (12:00)"
+    elif hour == 13:                   session = "SESSION 2 OPEN (13:30)"
+    elif hour == 14 and minute >= 30:  session = "SESSION 2 — 14:30 WIB (30 min to close ⚠️)"
+    elif hour == 15:                   session = "MARKET CLOSE (15:00)"
+    else:                              session = f"PORTFOLIO UPDATE ({hour:02d}:{minute:02d} WIB)"
 
     ACTION_THRESHOLD = int(os.getenv("ACTION_THRESHOLD_IDR", "1000000"))  # default Rp 1jt
     pnl_block = ""
@@ -259,26 +259,26 @@ def build_prompt(d: dict, history: list[dict] | None = None) -> str:
         total_invest = (d["avg_price"] * lots * 100) if (d.get("avg_price") and lots) else None
         above_thresh = abs(total_pnl) >= ACTION_THRESHOLD
         thresh_note  = (
-            f"Total P&L Rp {total_pnl:+,.0f} {'✅ di atas' if above_thresh else '⚠️ di bawah'} "
-            f"threshold aksi (Rp {ACTION_THRESHOLD:,.0f}). "
-            f"{'Pertimbangkan aksi.' if above_thresh else 'Cukup monitor saja, belum perlu aksi.'}"
+            f"Total P&L Rp {total_pnl:+,.0f} {'✅ above' if above_thresh else '⚠️ below'} "
+            f"action threshold (Rp {ACTION_THRESHOLD:,.0f}). "
+            f"{'Consider taking action.' if above_thresh else 'Monitor only — not material yet.'}"
         )
         pnl_block = f"""
-POSISI INVESTOR:
-- Lot Dipegang          : {lots} lot ({lots*100:,} lembar)
-- Modal Investasi       : {fmt_cap(total_invest) if total_invest else "N/A"}
-- Harga Beli Rata-rata  : Rp {d['avg_price']:,.2f}
-- Harga Sekarang        : {fmt_idr(d['current_price'])}
-- P&L per Lembar        : {fmt_idr(d['unrealized_pnl'])} ({sign(d['unrealized_pnl_pct'])}{d['unrealized_pnl_pct']}%)
+INVESTOR POSITION:
+- Lots Held             : {lots} lot ({lots*100:,} shares)
+- Capital Invested      : {fmt_cap(total_invest) if total_invest else "N/A"}
+- Average Buy Price     : Rp {d['avg_price']:,.2f}
+- Current Price         : {fmt_idr(d['current_price'])}
+- P&L per Share         : {fmt_idr(d['unrealized_pnl'])} ({sign(d['unrealized_pnl_pct'])}{d['unrealized_pnl_pct']}%)
 - Total P&L             : Rp {total_pnl:+,.0f}
 - Status                : {d['position_status']}
-- Threshold Aksi        : {thresh_note}
-- Jarak dari 52W High   : {d['dist_from_high']}%
-- Jarak dari 52W Low    : {d['dist_from_low']}%"""
+- Action Threshold      : {thresh_note}
+- Dist from 52W High    : {d['dist_from_high']}%
+- Dist from 52W Low     : {d['dist_from_low']}%"""
 
     trend_block = ""
     if history and len(history) > 1:
-        trend_lines = ["TREND HARGA (terbaru → lama):"]
+        trend_lines = ["PRICE TREND (newest → oldest):"]
         for snap in history[:5]:
             ts = snap.get("fetched_at")
             if ts:
@@ -291,21 +291,21 @@ POSISI INVESTOR:
             trend_lines.append(f"- {ts_str}: Rp {price:,.0f} ({day_str})")
         trend_block = "\n".join(trend_lines)
 
-    return f"""Kamu adalah analis saham IDX yang membantu investor retail memutuskan BUY/SELL/HOLD secara real-time.
+    return f"""You are an IDX stock analyst helping a retail investor decide BUY/SELL/HOLD in real-time.
 
-=== SESI BURSA: {session} ===
+=== MARKET SESSION: {session} ===
 
 === {d['ticker']} — {d['name']} ===
-Sektor: {d['sector']} | {d['industry']}
-Konteks: {d['notes']}
+Sector: {d['sector']} | {d['industry']}
+Context: {d['notes']}
 
-HARGA:
-- Sekarang : {fmt_idr(d['current_price'])} ({d['day_arrow']} {sign(d['day_change_pct'])}{d['day_change_pct']}%)
-- Volume   : {f"{d['volume']:,}" if d.get('volume') else "N/A"} lot
+PRICE:
+- Current  : {fmt_idr(d['current_price'])} ({d['day_arrow']} {sign(d['day_change_pct'])}{d['day_change_pct']}%)
+- Volume   : {f"{d['volume']:,}" if d.get('volume') else "N/A"} lots
 - 52W High : {fmt_idr(d['high_52w'])} | 52W Low: {fmt_idr(d['low_52w'])}
 {pnl_block}
 
-FUNDAMENTAL:
+FUNDAMENTALS:
 - P/E: {d['pe']}x | P/B: {d['pb']}x | Beta: {d['beta']}
 - ROE: {d['roe_pct']}% | Profit Margin: {d['profit_margin_pct']}%
 - Dividend Yield: {d['div_yield_pct']}% | EPS: {fmt_idr(d['eps'], 2)}
@@ -313,30 +313,28 @@ FUNDAMENTAL:
 
 {trend_block}
 
-INSTRUKSI FORMAT:
-Tulis HANYA dalam HTML Telegram. Gunakan HANYA tag: <b>, <i>, <code>.
-JANGAN gunakan Markdown (**, ##, -, *). JANGAN tulis ```html atau ```.
-Maksimal 200 kata.
+FORMAT INSTRUCTIONS:
+Write ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
+Do NOT use Markdown (**, ##, -, *). Do NOT write ```html or ```.
+Maximum 200 words.
 
-FORMAT WAJIB (isi bagian dalam kurung siku):
+REQUIRED FORMAT (fill in the bracketed sections):
 
 <b>{d['ticker']} {d['pnl_arrow']} {d['position_status']}</b>
-<i>{d['name']} | {d['day_arrow']} {sign(d['day_change_pct'])}{d['day_change_pct']}% | {session}</i>
+<i>{d['name']} | {color_pnl(d['day_change_pct'])} {sign(d['day_change_pct'])}{d['day_change_pct']}% | {session}</i>
 
-<b>📍 Posisi Kamu</b>
-{d.get('lots',0)} lot | Beli: <code>Rp {d['avg_price']:,.2f}</code> → Sekarang: <code>{fmt_idr(d['current_price'])}</code>
-P&L/lembar: <code>{fmt_idr(d['unrealized_pnl'])} ({sign(d['unrealized_pnl_pct'])}{d['unrealized_pnl_pct']}%)</code>
-Total P&L: <code>Rp {(d.get('total_pnl') or 0):+,.0f}</code>
-[1 kalimat konteks posisi]
+<b>📍 Your Position</b>
+{d.get('lots',0)} lots | Bought: <code>Rp {d['avg_price']:,.2f}</code> → Now: <code>{fmt_idr(d['current_price'])}</code>
+P&L/share: {color_pnl(d['unrealized_pnl'])} <code>{fmt_idr(d['unrealized_pnl'])} ({sign(d['unrealized_pnl_pct'])}{d['unrealized_pnl_pct']}%)</code>
+Total P&L: {color_pnl(d.get('total_pnl'))} <code>Rp {(d.get('total_pnl') or 0):+,.0f}</code>
+[1 sentence position context]
 
-<b>⚡ Aksi Disarankan Sekarang</b>
-[Jika total P&L di bawah Rp 1.000.000: tulis MONITOR — belum material untuk aksi]
-[Jika total P&L di atas Rp 1.000.000: BUY / AVERAGE DOWN / HOLD / TRIM / CUT LOSS — alasan 2 kalimat + level harga]
+<b>⚡ Recommended Action</b>
+[If total P&L below Rp 1,000,000: write MONITOR — not material enough for action]
+[If total P&L above Rp 1,000,000: BUY / AVERAGE DOWN / HOLD / TRIM / CUT LOSS — 2-sentence reason + price level]
 
 <b>⚠️ Watch Out</b>
-[1 risiko spesifik hari ini]
-
-<i>Bukan rekomendasi investasi resmi. DYOR.</i>"""
+[1 specific risk today]"""
 
 
 # ──────────────────────────────────────────────
@@ -361,8 +359,8 @@ def call_ollama(prompt: str) -> str:
                 "stream": False,
                 "options": {
                     "temperature": 0.3,
-                    "num_predict": 1024,   # raised — gemma4 needs more room
-                    "num_ctx":     4096,   # explicit context window
+                    "num_predict": 2048,
+                    "num_ctx":     8192,
                 },
                 "messages": [
                     {"role": "system",  "content": system_msg or "You are a helpful stock analyst."},
@@ -496,14 +494,24 @@ def send_telegram(text: str, chat_id: str = TELEGRAM_CHAT_ID):
     if len(text) <= LIMIT:
         chunks = [text]
     else:
-        paragraphs = text.split("\n\n")
+        def _split_units(blob: str) -> list[str]:
+            """Split blob into units no larger than LIMIT, paragraph then line."""
+            units = []
+            for para in blob.split("\n\n"):
+                if len(para) <= LIMIT:
+                    units.append(para)
+                else:
+                    for line in para.split("\n"):
+                        units.append(line)
+            return units
+
         current = ""
-        for para in paragraphs:
-            candidate = current + ("\n\n" if current else "") + para
+        for unit in _split_units(text):
+            candidate = current + ("\n\n" if current else "") + unit
             if len(candidate) > LIMIT:
                 if current:
                     chunks.append(current.strip())
-                current = para
+                current = unit[:LIMIT]  # hard-truncate pathological single lines
             else:
                 current = candidate
         if current:

@@ -86,6 +86,14 @@ def pnl_icon(pct) -> str:
     return "🔴"
 
 
+def color_pnl(val) -> str:
+    """Return colored circle emoji based on sign of val."""
+    if val is None: return "⚪"
+    if val > 0:     return "🟢"
+    if val < 0:     return "🔴"
+    return "⚪"
+
+
 def calc_pnl(current_price: float, avg_price: float, lots: int = 0) -> dict:
     """Calculate P&L metrics. Returns dict with pnl, pnl_pct, total_pnl, invested."""
     pnl = round(current_price - avg_price, 0)

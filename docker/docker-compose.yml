@@ -5,6 +5,7 @@ services:
     image: ghcr.io/marvello/my-stocks:latest
     container_name: idx-cron
     restart: unless-stopped
+    user: root
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
@@ -19,6 +20,7 @@ services:
     image: ghcr.io/marvello/my-stocks:latest
     container_name: idx-bot
     restart: unless-stopped
+    user: root
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
@@ -39,14 +41,16 @@ services:
     image: ghcr.io/marvello/my-stocks:latest
     container_name: idx-ui
     restart: unless-stopped
+    user: root
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
+      - PYTHONPATH=/project
     volumes:
       - ../data:/project/data
     ports:
       - "8501:8501"
-    command: streamlit run app/ui.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
+    command: python -m streamlit run app/ui.py --server.port 8501 --server.address 0.0.0.0 --server.headless true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
       interval: 30s

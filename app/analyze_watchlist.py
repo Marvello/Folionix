@@ -133,41 +133,41 @@ def build_watchlist_prompt(data: dict, rationale: str = "", source: str = "user"
 
     price_str = fmt_idr(price) if price else "N/A"
 
-    return f"""Kamu adalah analis saham IDX senior. Ini adalah saham WATCHLIST (belum dimiliki), bukan portofolio aktif.
+    return f"""You are a senior IDX stock analyst. This is a WATCHLIST stock (not yet owned), not an active portfolio position.
 
-Saham    : {ticker} ({name})
-Sumber   : {source_note}
-Harga    : {price_str}
+Stock    : {ticker} ({name})
+Source   : {source_note}
+Price    : {price_str}
 Volume   : {f"{volume:,}" if volume else "N/A"}
-52W High : {fmt_idr(high52)} (jarak: {dist_high}%)
-52W Low  : {fmt_idr(low52)} (jarak: {dist_low}%)
-PER      : {pe}x
-PBV      : {pb}x
+52W High : {fmt_idr(high52)} (dist: {dist_high}%)
+52W Low  : {fmt_idr(low52)} (dist: {dist_low}%)
+P/E      : {pe}x
+P/B      : {pb}x
 ROE      : {roe}%
 Div Yield: {div_yield}%
 
-Berikan analisis singkat dalam format berikut:
-1. **Kondisi Teknikal** (2-3 kalimat: tren harga, posisi vs 52W range)
-2. **Fundamental Snapshot** (1-2 kalimat: valuasi, ROE, yield)
-3. **Katalis & Risiko** (1-2 kalimat tiap sisi)
-4. **VERDICT: [BUY SEKARANG / TUNGGU / HINDARI]** — satu pilihan saja, dengan alasan singkat satu kalimat.
+Provide a concise analysis in the following format:
+1. **Technical** (2-3 sentences: price trend, position vs 52W range)
+2. **Fundamental Snapshot** (1-2 sentences: valuation, ROE, yield)
+3. **Catalysts & Risks** (1-2 sentences each side)
+4. **VERDICT: [BUY NOW / WAIT / AVOID]** — one choice only, one-sentence reason.
 
-Kriteria:
-- BUY SEKARANG: fundamental kuat, valuasi wajar/murah, momentum bagus
-- TUNGGU: fundamental oke tapi belum breakout atau masih sideways
-- HINDARI: overbought, fundamental lemah, atau risiko tinggi
+Criteria:
+- BUY NOW: strong fundamentals, fair/cheap valuation, good momentum
+- WAIT: fundamentals OK but no breakout yet or still sideways
+- AVOID: overbought, weak fundamentals, or high risk
 
-INSTRUKSI FORMAT:
-Tulis HANYA dalam HTML Telegram. Gunakan HANYA tag: <b>, <i>, <code>.
-JANGAN gunakan Markdown (**, ##, -, *). JANGAN tulis ```html atau ```.
-Maksimal 150 kata. Langsung ke poin. Tidak perlu disclaimer panjang.
+FORMAT INSTRUCTIONS:
+Write ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
+Do NOT use Markdown (**, ##, -, *). Do NOT write ```html or ```.
+Maximum 150 words. Go straight to the point. No lengthy disclaimers.
 """
 
 
 def extract_watchlist_verdict(text: str) -> str:
     """Extract verdict keyword from watchlist analysis output."""
     upper = text.upper()
-    for kw in ["BUY SEKARANG", "TUNGGU", "HINDARI"]:
+    for kw in ["BUY NOW", "WAIT", "AVOID"]:
         if kw in upper:
             return kw
     return "UNKNOWN"
