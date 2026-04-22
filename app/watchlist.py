@@ -38,7 +38,7 @@ def load_watchlist() -> dict:
         return {"user": [], "ai_suggested": []}
     try:
         data = json.loads(path.read_text())
-    except Exception as e:
+    except (json.JSONDecodeError, OSError) as e:
         log.error(f"Failed to read watchlist.json: {e}")
         return {"user": [], "ai_suggested": []}
     if not validate_watchlist_json(data):
@@ -61,7 +61,8 @@ def all_tickers(wl: dict) -> list[str]:
 def _portfolio_tickers() -> list[str]:
     try:
         return [p["ticker"].upper() for p in get_all_positions()]
-    except Exception:
+    except Exception as e:
+        log.error(f"Failed to load portfolio positions: {e}")
         return []
 
 
@@ -104,6 +105,16 @@ def remove_ticker(ticker: str) -> dict:
 
 # ── AI Suggest ────────────────────────────────────────────────────────────────
 
+def _parse_ollama_json(raw: str) -> list:
+    """Parse Ollama response, stripping markdown fences and returning JSON array."""
+    clean = raw.strip()
+    if clean.startswith("```"):
+        clean = "\n".join(clean.split("\n")[1:])
+    if clean.endswith("```"):
+        clean = "\n".join(clean.split("\n")[:-1])
+    return json.loads(clean.strip())
+
+
 def _call_ollama(prompt: str) -> str:
     resp = requests.post(
         f"{OLLAMA_URL}/api/chat",
@@ -132,7 +143,8 @@ def suggest(count: int = 5) -> dict:
     try:
         port_raw  = json.loads(Path(PORTFOLIO_FILE).read_text())
         positions = port_raw.get("positions", [])
-    except Exception:
+    except Exception as e:
+        log.warning(f"Could not read portfolio.json for suggest context: {e}")
         positions = []
 
     portfolio_summary = "\n".join(
@@ -164,17 +176,12 @@ Only output the JSON array. No preamble, no markdown fences."""
 
     try:
         raw = _call_ollama(prompt)
-    except Exception as e:
+    except requests.RequestException as e:
         log.error(f"Ollama request failed: {e}")
         return {"ok": False, "message": "Gagal menghubungi Ollama.", "suggestions": []}
 
     try:
-        clean = raw.strip()
-        if clean.startswith("```"):
-            clean = "\n".join(clean.split("\n")[1:])
-        if clean.endswith("```"):
-            clean = "\n".join(clean.split("\n")[:-1])
-        parsed = json.loads(clean.strip())
+        parsed = _parse_ollama_json(raw)
     except json.JSONDecodeError:
         log.error(f"Failed to parse Ollama response: {raw[:200]}")
         return {"ok": False, "message": "AI mengembalikan format tidak valid.", "suggestions": []}
