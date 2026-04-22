@@ -16,6 +16,7 @@ import argparse
 import json
 import logging
 import os
+import re
 from datetime import date
 from pathlib import Path
 
@@ -37,11 +38,31 @@ PORTFOLIO_FILE = BASE_DIR / "data" / "json" / "portfolio.json"
 
 
 # ── I/O helpers ──────────────────────────────────────────────────────────────
+def _validate_watchlist(data: dict) -> bool:
+    """Validate watchlist JSON schema."""
+    if not isinstance(data, dict):
+        return False
+    for key in ("user", "ai_suggested"):
+        entries = data.get(key, [])
+        if not isinstance(entries, list):
+            return False
+        for e in entries:
+            if not isinstance(e, dict) or "ticker" not in e:
+                return False
+            if not re.match(r"^[A-Z0-9]{1,10}$", e["ticker"].upper()):
+                return False
+    return True
+
+
 def load_watchlist() -> dict:
     """Load watchlist from JSON file."""
     if not WATCHLIST_FILE.exists():
         return {"user": [], "ai_suggested": []}
-    return json.loads(WATCHLIST_FILE.read_text())
+    data = json.loads(WATCHLIST_FILE.read_text())
+    if not _validate_watchlist(data):
+        log.error("Invalid watchlist.json schema")
+        return {"user": [], "ai_suggested": []}
+    return data
 
 
 def save_watchlist(data: dict) -> None:
@@ -76,6 +97,9 @@ def all_watchlist_tickers(wl: dict) -> list[str]:
 def cmd_add(ticker: str, notes: str = "") -> None:
     """Add a ticker to user watchlist."""
     ticker = ticker.upper()
+    if not re.match(r"^[A-Z0-9]{1,10}$", ticker):
+        log.error(f"Invalid ticker format: {ticker}")
+        return
     wl = load_watchlist()
     portfolio = load_portfolio_tickers()
 

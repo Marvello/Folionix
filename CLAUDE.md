@@ -12,22 +12,22 @@ Indonesian stock portfolio (IDX) analyzer. Fetches market data via yfinance, run
 app/                        # Main application code
 ├── __init__.py
 ├── fetch_portfolio.py      # Data pipeline (yfinance → Ollama → Telegram)
-├── db.py                   # SQLAlchemy Core database layer
+├── analyze_watchlist.py    # Watchlist analysis pipeline
 ├── bot.py                  # Telegram bot (long-polling)
+├── db.py                   # SQLAlchemy Core database layer
 ├── ui.py                   # Streamlit dashboard
 ├── utils.py                # Shared helpers
-├── analyze_watchlist.py    # Watchlist analysis pipeline
 docker/                     # Docker-related files
 ├── Dockerfile
 ├── docker-compose.yml
 ├── crontab
 scripts/                    # Utility scripts
 ├── watchlist_manager.py    # CLI: add/remove/suggest watchlist tickers
-data/                       # Runtime data (gitignored)
-├── app.db                  # SQLite database
+data/                       # Runtime data (gitignored except json/)
+├── app.db                  # SQLite database (gitignored)
 ├── json/
-│   ├── portfolio.json      # Stock positions
-│   └── watchlist.json      # Watchlist tickers
+│   ├── portfolio.json      # Stock positions (tracked)
+│   └── watchlist.json      # Watchlist tickers (tracked)
 tests/                      # pytest test suite
 ```
 
@@ -58,11 +58,14 @@ streamlit run app/ui.py --server.port 8501
 python scripts/watchlist_manager.py add TLKM "Defensive telco"
 python scripts/watchlist_manager.py suggest
 python -m app.analyze_watchlist
+
+# Tests
+pytest tests/ -v
 ```
 
 ## Docker
 
-Three services in `docker/docker-compose.yml`: `idx-cron` (scheduled fetch via supercronic), `idx-bot` (Telegram), `idx-ui` (Streamlit on port 8501). All share `.env` and `data/` volume.
+Three services in `docker/docker-compose.yml`: `idx-cron` (supercronic), `idx-bot` (Telegram), `idx-ui` (Streamlit on 8501). All share `.env` and `data/` volume.
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
@@ -88,8 +91,8 @@ app/analyze_watchlist.py →  yfinance → Ollama LLM → Telegram alerts
 - **app/analyze_watchlist.py**: Same pipeline for watchlist tickers (not owned). Produces BUY SEKARANG / TUNGGU / HINDARI verdicts.
 - **app/db.py**: SQLAlchemy Core (not ORM). Tables: `stock_snapshots`, `llm_analyses`, `portfolio_positions`. SQLite default with WAL mode, PostgreSQL-ready.
 - **app/bot.py**: Telegram long-polling with chat ID whitelisting. /add only adds new, /update only modifies existing.
-- **app/ui.py**: Streamlit multi-page app: Dashboard, Watchlist, Positions, History, Analysis Log, Accuracy.
-- **app/utils.py**: Shared helpers (formatting, timezone, version, atomic JSON writes).
+- **app/ui.py**: Streamlit multi-page: Dashboard, Watchlist, Positions, History, Analysis Log, Accuracy.
+- **app/utils.py**: Shared helpers (formatting, timezone, version, atomic JSON writes, JSON schema validation).
 
 ## Key Configuration
 
@@ -110,3 +113,12 @@ app/analyze_watchlist.py →  yfinance → Ollama LLM → Telegram alerts
 - P&L status emoji: 🟢 PROFIT, ⚪ BREAKEVEN, 🟡 RUGI TIPIS, 🔴 RUGI
 - JSON files written atomically via `write_json_atomic()` in utils
 - All persistent data lives under `data/` directory
+
+## Security
+
+- Docker runs as non-root (`appuser`)
+- Never expose internal errors/stack traces to users — log internally, show generic message
+- All ticker inputs validated with regex `^[A-Z0-9]{1,10}$`
+- JSON files validated against schema before use (`validate_portfolio_json`, `validate_watchlist_json`)
+- Secrets via `.env` only, never hardcoded
+- See `.claude/rules/security.md` for full security standards

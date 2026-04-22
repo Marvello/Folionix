@@ -17,6 +17,8 @@ load_dotenv()
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+    logging.warning("TELEGRAM_TOKEN or TELEGRAM_CHAT_ID not set")
 PORTFOLIO_FILE   = os.getenv("PORTFOLIO_FILE", "data/json/portfolio.json")
 ALLOWED_CHAT_ID  = str(TELEGRAM_CHAT_ID)
 
@@ -132,6 +134,8 @@ def _parse_position_args(args, min_args=3, usage=""):
         lots = int(args[2])
     except ValueError:
         return None
+    if avg <= 0 or lots <= 0:
+        return None
     notes = " ".join(args[3:]) if len(args) > 3 else ""
     return ticker, avg, lots, notes
 
@@ -194,11 +198,13 @@ def cmd_analyze(chat_id, args):
             capture_output=True, text=True, timeout=180
         )
         if result.returncode != 0:
-            send(chat_id, f"⚠️ Error:\n<code>{result.stderr[-300:]}</code>")
+            log.error(f"Analyze {ticker} failed: {result.stderr[-300:]}")
+            send(chat_id, f"⚠️ Gagal menganalisis <b>{ticker}</b>. Cek log server.")
     except subprocess.TimeoutExpired:
         send(chat_id, f"⚠️ Timeout saat menganalisis {ticker}.")
     except Exception as e:
-        send(chat_id, f"⚠️ Error: <code>{e}</code>")
+        log.error(f"Analyze {ticker} exception: {e}", exc_info=True)
+        send(chat_id, "⚠️ Terjadi kesalahan internal. Cek log server.")
 
 def cmd_accuracy(chat_id, args):
     try:
@@ -279,7 +285,7 @@ def handle_message(message):
             handler(chat_id, args)
         except Exception as e:
             log.error(f"Handler error: {e}", exc_info=True)
-            send(chat_id, f"⚠️ Error: <code>{e}</code>")
+            send(chat_id, "⚠️ Terjadi kesalahan internal. Cek log server.")
     else:
         send(chat_id, f"❓ Command tidak dikenal. Ketik /help")
 

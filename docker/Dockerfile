@@ -21,6 +21,10 @@ COPY docker/crontab ./crontab
 # Ensure data directories exist
 RUN mkdir -p data/json
 
+# Non-root user for security
+RUN useradd -m appuser && chown -R appuser:appuser /project
+USER appuser
+
 ARG GIT_COMMIT=unknown
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV PYTHONUNBUFFERED=1

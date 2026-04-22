@@ -6,6 +6,7 @@ Run: streamlit run ui.py --server.port 8501
 
 import json
 import os
+import re
 from datetime import datetime
 import streamlit as st
 import pandas as pd
@@ -308,13 +309,15 @@ elif page == "Positions":
     new_notes  = col4.text_input("Notes", placeholder="Optional")
 
     if st.button("➕ Tambah"):
-        if new_ticker and new_avg > 0 and new_lots > 0:
+        if not new_ticker or not re.match(r"^[A-Z0-9]{1,10}$", new_ticker):
+            st.error("Ticker tidak valid (1-10 huruf/angka).")
+        elif new_avg <= 0 or new_lots <= 0:
+            st.error("Avg Price dan Lots harus > 0.")
+        else:
             upsert_position(new_ticker, new_avg, new_lots, new_notes)
             sync_portfolio_json(PORTFOLIO_FILE)
             st.success(f"✅ {new_ticker} ditambahkan.")
             st.rerun()
-        else:
-            st.error("Ticker, Avg Price, dan Lots wajib diisi.")
 
 
 # ── PAGE: History ─────────────────────────────────────────────────────────────

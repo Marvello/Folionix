@@ -130,3 +130,37 @@ def write_json_atomic(path: str, data: dict) -> None:
         tmp.flush()
         os.fsync(tmp.fileno())
     os.replace(tmp.name, path)
+
+
+def validate_portfolio_json(data: dict) -> bool:
+    """Validate portfolio.json schema. Returns True if valid."""
+    if not isinstance(data, dict) or "positions" not in data:
+        return False
+    if not isinstance(data["positions"], list):
+        return False
+    for p in data["positions"]:
+        if not isinstance(p, dict):
+            return False
+        if "ticker" not in p or "avg_price" not in p:
+            return False
+        if not isinstance(p["ticker"], str) or not re.match(r"^[A-Z0-9]{1,10}$", p["ticker"].upper()):
+            return False
+        if not isinstance(p["avg_price"], (int, float)) or p["avg_price"] < 0:
+            return False
+    return True
+
+
+def validate_watchlist_json(data: dict) -> bool:
+    """Validate watchlist.json schema. Returns True if valid."""
+    if not isinstance(data, dict):
+        return False
+    for key in ("user", "ai_suggested"):
+        entries = data.get(key, [])
+        if not isinstance(entries, list):
+            return False
+        for e in entries:
+            if not isinstance(e, dict) or "ticker" not in e:
+                return False
+            if not isinstance(e["ticker"], str) or not re.match(r"^[A-Z0-9]{1,10}$", e["ticker"].upper()):
+                return False
+    return True

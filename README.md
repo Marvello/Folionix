@@ -26,6 +26,7 @@ Automated Indonesian stock portfolio tracker with LLM-powered analysis, Telegram
 - **Fetches** real-time IDX stock prices via Yahoo Finance
 - **Analyzes** each position using a local LLM (Ollama) with Indonesian-language prompts
 - **Alerts** via Telegram with actionable recommendations (BUY, HOLD, MONITOR, CUT LOSS, etc.)
+- **Watches** potential stocks via AI-powered watchlist with BUY SEKARANG / TUNGGU / HINDARI verdicts
 - **Tracks** price history, P&L, and recommendation accuracy over time
 - **Displays** everything in a Streamlit dashboard with portfolio CRUD
 
@@ -54,7 +55,7 @@ cp .env.example .env
 
 ### 2. Set Up Portfolio
 
-Edit `portfolio.json` with your positions:
+Edit `data/json/portfolio.json` with your positions:
 
 ```json
 {
@@ -72,8 +73,8 @@ Edit `portfolio.json` with your positions:
 **With Docker (recommended):**
 
 ```bash
-docker compose pull
-docker compose up -d
+docker compose -f docker/docker-compose.yml pull
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 **Without Docker:**
@@ -83,36 +84,67 @@ python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 # Run full analysis
-python fetch_portfolio.py
+python -m app.fetch_portfolio
 
 # Start Telegram bot
-python bot.py
+python -m app.bot
 
 # Start dashboard
-streamlit run ui.py --server.port 8501
+streamlit run app/ui.py --server.port 8501
+```
+
+## Project Structure
+
+```
+app/                        # Application code
+├── fetch_portfolio.py      # Main data pipeline
+├── analyze_watchlist.py    # Watchlist analysis pipeline
+├── bot.py                  # Telegram bot
+├── db.py                   # Database layer (SQLAlchemy Core)
+├── ui.py                   # Streamlit dashboard
+├── utils.py                # Shared helpers
+docker/                     # Docker config
+├── Dockerfile              # Multi-service image
+├── docker-compose.yml      # 3 services (cron, bot, ui)
+├── crontab                 # Supercronic schedule
+scripts/                    # Utility scripts
+├── watchlist_manager.py    # Watchlist CLI
+data/json/                  # Tracked data files
+├── portfolio.json          # Stock positions
+├── watchlist.json          # Watchlist tickers
+tests/                      # Test suite
 ```
 
 ## Docker Services
 
 | Service | Purpose | Port |
 |---------|---------|------|
-| `idx-cron` | Scheduled fetcher (weekdays, IDX market hours) | — |
+| `idx-cron` | Scheduled fetcher + watchlist (weekdays, IDX market hours) | — |
 | `idx-bot` | Telegram bot (long-polling) | — |
 | `idx-ui` | Streamlit dashboard | 8501 |
 
-All services share the same image (`ghcr.io/marvello/my-stocks:latest`), `.env` config, and `data/` volume for the SQLite database.
+All services share the same image (`ghcr.io/marvello/my-stocks:latest`), `.env` config, and `data/` volume. Container runs as non-root user.
 
 ## CLI Options
 
 ```bash
 # Analyze specific tickers only
-python fetch_portfolio.py BBCA BBRI
+python -m app.fetch_portfolio BBCA BBRI
 
 # Skip Telegram notifications
-python fetch_portfolio.py --no-telegram
+python -m app.fetch_portfolio --no-telegram
 
 # Skip LLM analysis (data fetch only)
-python fetch_portfolio.py --no-llm
+python -m app.fetch_portfolio --no-llm
+
+# Watchlist management
+python scripts/watchlist_manager.py add TLKM "Defensive telco"
+python scripts/watchlist_manager.py remove TLKM
+python scripts/watchlist_manager.py suggest    # AI suggestions
+python scripts/watchlist_manager.py list
+
+# Run watchlist analysis
+python -m app.analyze_watchlist
 ```
 
 ## Telegram Bot Commands
@@ -121,8 +153,8 @@ python fetch_portfolio.py --no-llm
 |---------|-------------|
 | `/status` | Current portfolio P&L summary |
 | `/detail BBCA` | Detailed analysis for a ticker |
-| `/add BBCA 9500 10` | Add position (ticker, avg price, lots) |
-| `/update BBCA 9200 15` | Update position |
+| `/add BBCA 9500 10` | Add new position (ticker, avg price, lots) |
+| `/update BBCA 9200 15` | Update existing position |
 | `/remove BBCA` | Deactivate position |
 | `/analyze BBCA` | Trigger on-demand LLM analysis |
 | `/portfolio` | Export portfolio as JSON |
@@ -139,15 +171,21 @@ python fetch_portfolio.py --no-llm
 | `SEND_TELEGRAM` | `true` | Enable/disable Telegram alerts |
 | `CACHE_MINUTES` | `30` | Skip re-fetch if data is fresh |
 | `ACTION_THRESHOLD_IDR` | `1000000` | Min P&L (Rp) to trigger action recommendation |
-| `DATABASE_URL` | `sqlite:///./data/idx_portfolio.db` | DB connection string |
+| `DATABASE_URL` | `sqlite:///./data/app.db` | DB connection string |
 | `UI_PASSWORD` | — | Optional Streamlit login password |
 
 ## Cron Schedule (IDX Market Hours)
 
+**Portfolio analysis:**
 ```
 Session 1:  09:05, 10:05, 11:05, 12:05 WIB (Mon-Fri)
 Session 2:  13:35, 14:35 WIB (Mon-Fri)
 Close:      15:05 WIB (Mon-Fri)
+```
+
+**Watchlist analysis:**
+```
+08:30, 15:30 WIB (Mon-Fri)
 ```
 
 ## Tech Stack

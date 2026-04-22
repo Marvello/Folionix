@@ -29,7 +29,8 @@ import requests
 from dotenv import load_dotenv
 from app.db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_latest_snapshot, get_latest_analysis, get_snapshots
 from app.utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
-                       WIB, now_wib, fmt_wib, get_version, get_version_url)
+                       WIB, now_wib, fmt_wib, get_version, get_version_url,
+                       validate_portfolio_json)
 
 load_dotenv()
 
@@ -41,8 +42,8 @@ log = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 OLLAMA_URL       = os.getenv("OLLAMA_URL",      "http://localhost:11434")
 OLLAMA_MODEL     = os.getenv("OLLAMA_MODEL",    "qwen2.5:7b")
-TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN",  "YOUR_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID","YOUR_CHAT_ID")
+TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN",  "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SEND_TELEGRAM    = os.getenv("SEND_TELEGRAM",   "true").lower() == "true"
 PORTFOLIO_FILE   = os.getenv("PORTFOLIO_FILE",  "data/json/portfolio.json")
 CACHE_MINUTES    = int(os.getenv("CACHE_MINUTES", "30"))
@@ -59,6 +60,8 @@ def load_portfolio() -> dict:
         raise FileNotFoundError(f"Portfolio file not found: {path}")
     with open(path) as f:
         data = json.load(f)
+    if not validate_portfolio_json(data):
+        raise ValueError(f"Invalid portfolio.json schema: {path}")
     return {
         p["ticker"].upper(): {
             "avg_price": p["avg_price"],
@@ -387,7 +390,7 @@ def call_ollama(prompt: str) -> str:
         return text
     except Exception as e:
         log.error(f"Ollama error: {e}")
-        return f"<b>⚠️ Ollama error</b>\n<code>{e}</code>"
+        return "<b>⚠️ Ollama error</b>\n<i>Gagal menghubungi model. Cek log server.</i>"
 
 
 # ──────────────────────────────────────────────
