@@ -16,6 +16,7 @@ from app.db import (init_db, get_all_positions, upsert_position, deactivate_posi
                     get_snapshots, get_analyses, sync_portfolio_json,
                     get_recommendation_accuracy)
 from app.utils import fmt_idr, fmt_cap, pnl_icon, calc_pnl, to_wib, WIB, sanitize_html, get_version, get_version_url
+from app import watchlist as wl_mod
 
 PORTFOLIO_FILE = os.getenv("PORTFOLIO_FILE", "data/json/portfolio.json")
 UI_PASSWORD = os.getenv("UI_PASSWORD", "")
@@ -146,66 +147,10 @@ if page == "Dashboard":
 elif page == "Watchlist":
     st.title("👀 Watchlist")
 
-    # Load watchlist.json
-    import json as _json
-    from pathlib import Path as _Path
-
-    _wl_path = _Path(os.getenv("WATCHLIST_FILE", "data/json/watchlist.json"))
-    if not _wl_path.exists():
-        # Try path relative to project root
-        _wl_path = _Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / "data" / "json" / "watchlist.json"
-
-    if not _wl_path.exists():
-        st.info("Belum ada watchlist. Buat watchlist.json terlebih dahulu.")
-        st.stop()
-
-    wl_data = _json.loads(_wl_path.read_text())
+    wl_data = wl_mod.load_watchlist()
     user_wl = wl_data.get("user", [])
-    ai_wl = wl_data.get("ai_suggested", [])
-    all_wl = user_wl + ai_wl
-
-    if not all_wl:
-        st.info("Watchlist kosong.")
-        st.stop()
-
-    # Build watchlist table with latest snapshot + analysis data
-    wl_rows = []
-    for entry in all_wl:
-        ticker = entry["ticker"].upper()
-        source = "AI" if entry in ai_wl else "User"
-        notes = entry.get("rationale", entry.get("notes", ""))
-        added = entry.get("added_at", "—")
-
-        snap = get_latest_snapshot(ticker)
-        analysis = get_latest_analysis(ticker)
-
-        price = snap.get("current_price") if snap else None
-        day_pct = snap.get("day_change_pct") if snap else None
-        pe = snap.get("pe") if snap else None
-        pb = snap.get("pb") if snap else None
-        high52 = snap.get("high_52w") if snap else None
-        low52 = snap.get("low_52w") if snap else None
-
-        rec = (analysis.get("recommendation") or "—") if analysis else "—"
-        last_update = ts_wib(snap.get("fetched_at")) if snap else "—"
-
-        # Verdict emoji
-        verdict_map = {"BUY SEKARANG": "🟢", "TUNGGU": "🟡", "HINDARI": "🔴"}
-        verdict_icon = verdict_map.get(rec, "")
-
-        wl_rows.append({
-            "Ticker": ticker,
-            "Source": f"{'👤' if source == 'User' else '🤖'} {source}",
-            "Harga": price,
-            "Day %": day_pct,
-            "P/E": pe,
-            "P/B": pb,
-            "52W High": high52,
-            "52W Low": low52,
-            "Verdict": f"{verdict_icon} {rec}" if rec != "—" else "—",
-            "Notes": notes[:50] if notes else "—",
-            "Update": last_update,
-        })
+    ai_wl   = wl_data.get("ai_suggested", [])
+    all_wl  = user_wl + ai_wl
 
     # Summary
     col1, col2, col3 = st.columns(3)
@@ -215,55 +160,124 @@ elif page == "Watchlist":
 
     st.divider()
 
-    # Table
-    df_wl = pd.DataFrame(wl_rows)
-    if not df_wl.empty:
-        def color_verdict(val):
-            if "BUY" in str(val):
-                return "color: #22c55e"
-            if "HINDARI" in str(val):
-                return "color: #ef4444"
-            if "TUNGGU" in str(val):
-                return "color: #eab308"
+    if all_wl:
+        wl_rows = []
+        for entry in all_wl:
+            ticker = entry["ticker"].upper()
+            source = "AI" if entry in ai_wl else "User"
+            notes  = entry.get("rationale", entry.get("notes", ""))
+            snap     = get_latest_snapshot(ticker)
+            analysis = get_latest_analysis(ticker)
+            price    = snap.get("current_price") if snap else None
+            day_pct  = snap.get("day_change_pct") if snap else None
+            pe       = snap.get("pe") if snap else None
+            pb       = snap.get("pb") if snap else None
+            high52   = snap.get("high_52w") if snap else None
+            low52    = snap.get("low_52w") if snap else None
+            rec      = (analysis.get("recommendation") or "—") if analysis else "—"
+            verdict_map  = {"BUY SEKARANG": "🟢", "TUNGGU": "🟡", "HINDARI": "🔴"}
+            verdict_icon = verdict_map.get(rec, "")
+            wl_rows.append({
+                "Ticker":  ticker,
+                "Source":  f"{'👤' if source == 'User' else '🤖'} {source}",
+                "Harga":   price,
+                "Day %":   day_pct,
+                "P/E":     pe,
+                "P/B":     pb,
+                "52W High": high52,
+                "52W Low":  low52,
+                "Verdict": f"{verdict_icon} {rec}" if rec != "—" else "—",
+                "Notes":   notes[:50] if notes else "—",
+                "Update":  ts_wib(snap.get("fetched_at")) if snap else "—",
+            })
+
+        df_wl = pd.DataFrame(wl_rows)
+
+        def _color_verdict(val):
+            if "BUY"     in str(val): return "color: #22c55e"
+            if "HINDARI" in str(val): return "color: #ef4444"
+            if "TUNGGU"  in str(val): return "color: #eab308"
             return ""
 
-        def color_day_pct(val):
-            if val is None or val == 0:
-                return ""
+        def _color_day(val):
+            if val is None or val == 0: return ""
             return "color: #22c55e" if val > 0 else "color: #ef4444"
-
-        idr_cols_wl = ["Harga", "52W High", "52W Low"]
 
         styled_wl = (
             df_wl.style
             .format({
-                "Harga": lambda x: fmt_idr(x) if x else "—",
-                "Day %": lambda x: f"{x:+.2f}%" if x else "—",
-                "P/E": lambda x: f"{x:.1f}x" if x else "—",
-                "P/B": lambda x: f"{x:.2f}x" if x else "—",
+                "Harga":    lambda x: fmt_idr(x) if x else "—",
+                "Day %":    lambda x: f"{x:+.2f}%" if x else "—",
+                "P/E":      lambda x: f"{x:.1f}x" if x else "—",
+                "P/B":      lambda x: f"{x:.2f}x" if x else "—",
                 "52W High": lambda x: fmt_idr(x) if x else "—",
-                "52W Low": lambda x: fmt_idr(x) if x else "—",
+                "52W Low":  lambda x: fmt_idr(x) if x else "—",
             })
-            .map(color_verdict, subset=["Verdict"])
-            .map(color_day_pct, subset=["Day %"])
-            .set_properties(subset=idr_cols_wl, **{"text-align": "right"})
-            .set_properties(subset=["Day %", "P/E", "P/B"], **{"text-align": "right"})
+            .map(_color_verdict, subset=["Verdict"])
+            .map(_color_day,     subset=["Day %"])
+            .set_properties(subset=["Harga", "52W High", "52W Low"], **{"text-align": "right"})
+            .set_properties(subset=["Day %", "P/E", "P/B"],           **{"text-align": "right"})
         )
-
         st.dataframe(styled_wl, use_container_width=True, hide_index=True)
 
-    # Show latest analysis for each ticker
-    st.divider()
-    st.subheader("Latest Analysis")
+        st.divider()
+        st.subheader("Latest Analysis")
+        for entry in all_wl:
+            ticker   = entry["ticker"].upper()
+            analysis = get_latest_analysis(ticker)
+            if analysis and analysis.get("clean_html"):
+                rec = analysis.get("recommendation") or "—"
+                ts  = ts_wib(analysis.get("analysed_at"))
+                with st.expander(f"**{ticker}** | {rec} | {ts}"):
+                    st.markdown(sanitize_html(analysis.get("clean_html", "")), unsafe_allow_html=True)
+    else:
+        st.info("Watchlist kosong.")
 
-    for entry in all_wl:
-        ticker = entry["ticker"].upper()
-        analysis = get_latest_analysis(ticker)
-        if analysis and analysis.get("clean_html"):
-            rec = analysis.get("recommendation") or "—"
-            ts = ts_wib(analysis.get("analysed_at"))
-            with st.expander(f"**{ticker}** | {rec} | {ts}"):
-                st.markdown(sanitize_html(analysis.get("clean_html", "")), unsafe_allow_html=True)
+    # ── Management panel ──────────────────────────────────────────────────────
+    st.divider()
+    st.subheader("🛠️ Kelola Watchlist")
+
+    with st.expander("➕ Tambah Ticker"):
+        c1, c2, c3 = st.columns([1, 2, 1])
+        wl_add_ticker = c1.text_input("Ticker", placeholder="TLKM", key="wl_add_ticker").upper()
+        wl_add_notes  = c2.text_input("Notes", placeholder="Alasan watchlist", key="wl_add_notes")
+        if c3.button("Tambah", key="wl_add_btn"):
+            if not wl_add_ticker:
+                st.error("Ticker wajib diisi.")
+            else:
+                res = wl_mod.add_ticker(wl_add_ticker, wl_add_notes)
+                if res["ok"]:
+                    st.success(res["message"])
+                    st.rerun()
+                else:
+                    st.error(res["message"])
+
+    with st.expander("🗑️ Hapus Ticker"):
+        all_current = wl_mod.all_tickers(wl_mod.load_watchlist())
+        if all_current:
+            c1, c2 = st.columns([3, 1])
+            wl_rm_ticker = c1.selectbox("Pilih ticker", all_current, key="wl_rm_ticker")
+            if c2.button("Hapus", key="wl_rm_btn"):
+                res = wl_mod.remove_ticker(wl_rm_ticker)
+                if res["ok"]:
+                    st.success(res["message"])
+                    st.rerun()
+                else:
+                    st.error(res["message"])
+        else:
+            st.info("Watchlist kosong.")
+
+    with st.expander("🤖 AI Saran Saham"):
+        c1, c2 = st.columns([1, 3])
+        wl_sug_count = c1.number_input("Jumlah saran", min_value=1, max_value=10, value=5, key="wl_sug_count")
+        if c2.button("Minta Saran AI", key="wl_sug_btn"):
+            with st.spinner("Menghubungi AI… mungkin 1-2 menit."):
+                res = wl_mod.suggest(int(wl_sug_count))
+            if res["ok"]:
+                st.success(res["message"])
+                st.rerun()
+            else:
+                st.error(res["message"])
 
 
 # ── PAGE: Positions (CRUD) ────────────────────────────────────────────────────
