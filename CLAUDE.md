@@ -17,12 +17,11 @@ app/                        # Main application code
 ├── db.py                   # SQLAlchemy Core database layer
 ├── ui.py                   # Streamlit dashboard
 ├── utils.py                # Shared helpers
+├── watchlist.py            # Watchlist business logic (shared by bot + UI)
 docker/                     # Docker-related files
 ├── Dockerfile
 ├── docker-compose.yml
 ├── crontab
-scripts/                    # Utility scripts
-├── watchlist_manager.py    # CLI: add/remove/suggest watchlist tickers
 data/                       # Runtime data (gitignored except json/)
 ├── app.db                  # SQLite database (gitignored)
 ├── json/
@@ -54,9 +53,7 @@ python -m app.bot
 # Streamlit dashboard
 streamlit run app/ui.py --server.port 8501
 
-# Watchlist management
-python scripts/watchlist_manager.py add TLKM "Defensive telco"
-python scripts/watchlist_manager.py suggest
+# Watchlist analysis
 python -m app.analyze_watchlist
 
 # Tests
@@ -83,15 +80,16 @@ app/analyze_watchlist.py →  yfinance → Ollama LLM → Telegram alerts
        ↓ (saves)
      app/db.py  ←→  SQLite (data/app.db) / PostgreSQL
        ↑ (reads)
-     app/bot.py  ←→  Telegram commands (/status, /add, /update, /remove, /analyze)
-     app/ui.py   ←→  Streamlit dashboard (Dashboard, Watchlist, Positions, History, Analysis Log, Accuracy)
+     app/bot.py  ←→  Telegram commands (/status, /add, /update, /remove, /analyze, /wadd, /wremove, /wlist)
+     app/ui.py   ←→  Streamlit dashboard (Dashboard + portfolio CRUD, Watchlist + watchlist CRUD, History, Analysis Log, Accuracy)
 ```
 
 - **app/fetch_portfolio.py**: Data pipeline. Fetches stock prices, builds Indonesian-language LLM prompts, calls Ollama `/api/chat`, cleans HTML output, saves snapshots + analyses to DB, sends Telegram alerts.
 - **app/analyze_watchlist.py**: Same pipeline for watchlist tickers (not owned). Produces BUY SEKARANG / TUNGGU / HINDARI verdicts.
 - **app/db.py**: SQLAlchemy Core (not ORM). Tables: `stock_snapshots`, `llm_analyses`, `portfolio_positions`. SQLite default with WAL mode, PostgreSQL-ready.
-- **app/bot.py**: Telegram long-polling with chat ID whitelisting. /add only adds new, /update only modifies existing.
-- **app/ui.py**: Streamlit multi-page: Dashboard, Watchlist, Positions, History, Analysis Log, Accuracy.
+- **app/bot.py**: Telegram long-polling with chat ID whitelisting. /add only adds new, /update only modifies existing. Watchlist commands: /wadd TICKER [notes] — add ticker to watchlist; /wremove TICKER — remove ticker from watchlist; /wlist — show current watchlist.
+- **app/ui.py**: Streamlit multi-page: Dashboard (+ portfolio CRUD), Watchlist (+ watchlist CRUD), History, Analysis Log, Accuracy.
+- **app/watchlist.py**: Shared watchlist business logic (add, remove, list, AI suggest) used by both bot and UI.
 - **app/utils.py**: Shared helpers (formatting, timezone, version, atomic JSON writes, JSON schema validation).
 
 ## Key Configuration

@@ -28,7 +28,7 @@ Automated Indonesian stock portfolio tracker with LLM-powered analysis, Telegram
 - **Alerts** via Telegram with actionable recommendations (BUY, HOLD, MONITOR, CUT LOSS, etc.)
 - **Watches** potential stocks via AI-powered watchlist with BUY SEKARANG / TUNGGU / HINDARI verdicts
 - **Tracks** price history, P&L, and recommendation accuracy over time
-- **Displays** everything in a Streamlit dashboard with portfolio CRUD
+- **Displays** everything in a Streamlit dashboard — Dashboard (+ portfolio CRUD), Watchlist (+ watchlist CRUD), History, Analysis Log, Accuracy
 
 ## Screenshots
 
@@ -103,12 +103,11 @@ app/                        # Application code
 ├── db.py                   # Database layer (SQLAlchemy Core)
 ├── ui.py                   # Streamlit dashboard
 ├── utils.py                # Shared helpers
+├── watchlist.py            # Watchlist business logic (shared by bot + UI)
 docker/                     # Docker config
 ├── Dockerfile              # Multi-service image
 ├── docker-compose.yml      # 3 services (cron, bot, ui)
 ├── crontab                 # Supercronic schedule
-scripts/                    # Utility scripts
-├── watchlist_manager.py    # Watchlist CLI
 data/json/                  # Tracked data files
 ├── portfolio.json          # Stock positions
 ├── watchlist.json          # Watchlist tickers
@@ -137,13 +136,7 @@ python -m app.fetch_portfolio --no-telegram
 # Skip LLM analysis (data fetch only)
 python -m app.fetch_portfolio --no-llm
 
-# Watchlist management
-python scripts/watchlist_manager.py add TLKM "Defensive telco"
-python scripts/watchlist_manager.py remove TLKM
-python scripts/watchlist_manager.py suggest    # AI suggestions
-python scripts/watchlist_manager.py list
-
-# Run watchlist analysis
+# Watchlist analysis
 python -m app.analyze_watchlist
 ```
 
@@ -159,6 +152,9 @@ python -m app.analyze_watchlist
 | `/analyze BBCA` | Trigger on-demand LLM analysis |
 | `/portfolio` | Export portfolio as JSON |
 | `/accuracy` | Recommendation backtest results |
+| `/wadd TLKM [notes]` | Add ticker to watchlist |
+| `/wremove TLKM` | Remove ticker from watchlist |
+| `/wlist` | Show current watchlist |
 
 ## Configuration
 
