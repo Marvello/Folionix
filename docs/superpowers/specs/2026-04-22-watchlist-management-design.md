@@ -67,7 +67,7 @@ Add a management panel below the existing read-only table:
   Ticker: [____]  Notes: [__________]  [➕ Tambah]
 
 [ Hapus Ticker ]
-  Pilih: [selectbox]  [🗑️ Hapas]
+  Pilih: [selectbox]  [🗑️ Hapus]
 
 [ AI Saran ]
   Jumlah: [1-10]  [🤖 Minta Saran AI]  ← shows spinner during Ollama call
@@ -75,6 +75,25 @@ Add a management panel below the existing read-only table:
 ```
 
 All three actions call `app/watchlist.py` functions and `st.rerun()` on success.
+
+## 3b. `app/ui.py` Dashboard page changes
+
+Remove "Positions" from sidebar nav. Merge all Positions CRUD into the Dashboard page, below the summary metrics and P&L table:
+
+```
+─── Kelola Posisi ──────────────────────────────────
+[ Edit existing — one expander per position ]
+  BBCA — 57 lot @ Rp 8,674
+    Avg Price: [____]  Lots: [____]  Notes: [____]
+    [💾 Simpan]  [🗑️ Nonaktifkan]
+
+[ Tambah Posisi Baru ]
+  Ticker: [____]  Avg: [____]  Lots: [____]  Notes: [____]
+  [➕ Tambah]
+─────────────────────────────────────────────────────
+```
+
+The Positions page is removed from the sidebar radio entirely.
 
 ## 4. Deletion
 
@@ -88,6 +107,5 @@ All three actions call `app/watchlist.py` functions and `st.rerun()` on success.
 ## Out of Scope
 
 - No change to watchlist.json schema
-- No change to Positions page (already has full CRUD)
 - No change to Docker/cron config
 - No new tests (existing test_utils.py covers atomic write; watchlist logic is thin wrappers)
