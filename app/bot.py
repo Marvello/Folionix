@@ -7,6 +7,9 @@ Commands:
   /update TICKER AVGPRICE LOTS
   /remove TICKER
   /analyze TICKER      — trigger on-demand analysis
+  /suggest [N]         — AI watchlist suggestions (default 5)
+  /accuracy [DAYS]     — recommendation accuracy report
+  /portfolio           — export all positions
   /help
 """
 
@@ -238,6 +241,54 @@ def cmd_accuracy(chat_id, args):
 
     send(chat_id, "\n".join(lines))
 
+def cmd_suggest(chat_id, args):
+    try:
+        count = int(args[0]) if args else 5
+        count = max(1, min(count, 10))
+    except ValueError:
+        send(chat_id, "⚠️ Format: <code>/suggest [N]</code> — e.g. <code>/suggest 5</code>"); return
+
+    send(chat_id, f"🤖 Asking AI for {count} stock suggestions… this may take a minute.")
+    try:
+        result = subprocess.run(
+            ["python", "scripts/watchlist_manager.py", "suggest", "--count", str(count)],
+            capture_output=True, text=True, timeout=300,
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+        )
+        if result.returncode != 0:
+            log.error(f"suggest failed: {result.stderr[-300:]}")
+            send(chat_id, "⚠️ AI suggestion failed. Check server log."); return
+    except subprocess.TimeoutExpired:
+        send(chat_id, "⚠️ Timed out waiting for AI suggestions."); return
+    except Exception as e:
+        log.error(f"cmd_suggest exception: {e}", exc_info=True)
+        send(chat_id, "⚠️ Internal error. Check server log."); return
+
+    # Read updated watchlist and format results
+    import json as _json
+    from pathlib import Path
+    wl_path = Path(os.path.dirname(os.path.dirname(__file__))) / "data" / "json" / "watchlist.json"
+    try:
+        wl = _json.loads(wl_path.read_text())
+    except Exception:
+        send(chat_id, "⚠️ Could not read watchlist.json after suggestion."); return
+
+    suggestions = wl.get("ai_suggested", [])
+    if not suggestions:
+        send(chat_id, "🤷 AI returned no suggestions this time. Try again."); return
+
+    lines = [f"<b>🤖 AI Watchlist Suggestions ({len(suggestions)} stocks)</b>\n"]
+    for i, s in enumerate(suggestions, 1):
+        ticker = s.get("ticker", "?")
+        sector = s.get("sector", "")
+        rationale = s.get("rationale", "")
+        lines.append(f"<b>{i}. {ticker}</b> <i>[{sector}]</i>")
+        if rationale:
+            lines.append(f"   {rationale}")
+    lines.append("\n<i>Added to watchlist. Use /analyze TICKER or run watchlist analysis for details.</i>")
+    send(chat_id, "\n".join(lines))
+
+
 def cmd_portfolio(chat_id, _):
     positions = get_all_positions()
     if not positions:
@@ -265,6 +316,7 @@ COMMANDS = {
     "/add": cmd_add, "/update": cmd_update,
     "/remove": cmd_remove,
     "/analyze": cmd_analyze,
+    "/suggest": cmd_suggest,
     "/portfolio": cmd_portfolio,
     "/accuracy": cmd_accuracy,
 }
@@ -296,10 +348,11 @@ def register_commands():
         {"command": "add", "description": "Tambah posisi: /add TICKER AVGPRICE LOTS"},
         {"command": "update", "description": "Update posisi: /update TICKER AVGPRICE LOTS"},
         {"command": "remove", "description": "Nonaktifkan posisi: /remove TICKER"},
-        {"command": "analyze", "description": "Analisis on-demand: /analyze TICKER"},
-        {"command": "portfolio", "description": "Export semua posisi"},
-        {"command": "accuracy", "description": "Akurasi rekomendasi: /accuracy [HARI]"},
-        {"command": "help", "description": "Tampilkan bantuan"},
+        {"command": "analyze", "description": "On-demand analysis: /analyze TICKER"},
+        {"command": "suggest", "description": "AI watchlist suggestions: /suggest [N]"},
+        {"command": "portfolio", "description": "Export all positions"},
+        {"command": "accuracy", "description": "Recommendation accuracy: /accuracy [DAYS]"},
+        {"command": "help", "description": "Show help"},
     ]
     try:
         requests.post(f"{BASE}/setMyCommands", json={"commands": commands}, timeout=10)
