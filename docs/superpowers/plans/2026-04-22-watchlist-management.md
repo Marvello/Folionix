@@ -590,9 +590,28 @@ to:
 page = st.sidebar.radio("Navigation", ["Dashboard", "Watchlist", "History", "Analysis Log", "Accuracy"])
 ```
 
-- [ ] **Step 2: Append position management panel to the Dashboard page**
+- [ ] **Step 2: Fix the early-stop guard so CRUD always renders**
 
-Find the end of the `if page == "Dashboard":` block (just before `elif page == "Watchlist":`). Add this at the end of the Dashboard block:
+The current Dashboard block calls `st.stop()` when there are no snapshots, which would prevent the CRUD panel from ever rendering (you couldn't add your first position). Replace:
+
+```python
+    if not snaps:
+        st.info("Belum ada data. Jalankan fetch_portfolio.py terlebih dahulu.")
+        st.stop()
+```
+
+with:
+
+```python
+    if not snaps:
+        st.info("Belum ada data. Jalankan fetch_portfolio.py terlebih dahulu.")
+```
+
+Then wrap the summary cards + table + chart in `if snaps:` (indented one level), so they only render when data exists but the CRUD panel below always renders.
+
+- [ ] **Step 3: Append position management panel to the Dashboard page**
+
+Find the end of the `if page == "Dashboard":` block (just before `elif page == "Watchlist":`). Add this at the end of the Dashboard block, OUTSIDE any `if snaps:` guard:
 
 ```python
     # ── Kelola Posisi ─────────────────────────────────────────────────────────
@@ -640,9 +659,9 @@ Find the end of the `if page == "Dashboard":` block (just before `elif page == "
             st.rerun()
 ```
 
-Note: `positions` in the Dashboard block is already `{p["ticker"]: p for p in get_all_positions()}` — use `.values()` to iterate.
+Note: `positions` in the Dashboard block is already `{p["ticker"]: p for p in get_all_positions()}` — use `.values()` to iterate. This variable is defined before the `if snaps:` guard so it is always available.
 
-- [ ] **Step 3: Delete the old Positions page block entirely**
+- [ ] **Step 4: Delete the old Positions page block entirely**
 
 Remove the entire `elif page == "Positions":` block (currently lines 269-320). It starts with:
 
@@ -653,7 +672,7 @@ elif page == "Positions":
 
 and ends just before `# ── PAGE: History`.
 
-- [ ] **Step 4: Verify no syntax errors**
+- [ ] **Step 5: Verify no syntax errors**
 
 ```bash
 cd /Users/marvellooni/Project/idx-portfolio
@@ -662,7 +681,7 @@ python -m py_compile app/ui.py && echo "OK"
 
 Expected: `OK`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add app/ui.py
