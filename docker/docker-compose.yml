@@ -1,20 +1,5 @@
 services:
 
-  # ── Cron scheduler (replaces host crontab) ──
-  idx-cron:
-    image: ghcr.io/marvello/my-stocks:latest
-    container_name: idx-cron
-    restart: unless-stopped
-    user: root
-    env_file: ../.env
-    environment:
-      - TZ=Asia/Jakarta
-    volumes:
-      - ../data:/project/data
-    extra_hosts:
-      - "debian-tower:host-gateway"
-    command: supercronic /project/crontab
-
   # ── Telegram bot ──
   idx-bot:
     image: ghcr.io/marvello/my-stocks:latest
@@ -70,7 +55,7 @@ services:
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
-      - GRAPH_SEND_TELEGRAM=false
+      - GRAPH_SEND_TELEGRAM=true
     volumes:
       - ../data:/project/data
     extra_hosts:

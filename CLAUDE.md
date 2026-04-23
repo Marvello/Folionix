@@ -29,7 +29,6 @@ app/                        # Main application code
 docker/                     # Docker-related files
 ├── Dockerfile
 ├── docker-compose.yml
-├── crontab
 data/                       # Runtime data (gitignored except json/)
 ├── app.db                  # SQLite database (gitignored)
 ├── json/
@@ -73,7 +72,7 @@ pytest tests/ -v
 
 ## Docker
 
-Four services in `docker/docker-compose.yml`: `idx-cron` (supercronic), `idx-bot` (Telegram), `idx-ui` (Streamlit on 8501), `idx-graph` (LangGraph orchestrator). All share `.env` and `data/` volume.
+Three services in `docker/docker-compose.yml`: `idx-graph` (LangGraph orchestrator), `idx-bot` (Telegram), `idx-ui` (Streamlit on 8501). All share `.env` and `data/` volume.
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d

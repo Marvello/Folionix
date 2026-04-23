@@ -113,8 +113,7 @@ app/                        # Application code
 │   └── runner.py           # Long-running entry point
 docker/                     # Docker config
 ├── Dockerfile              # Multi-service image
-├── docker-compose.yml      # 4 services (cron, bot, ui, graph)
-├── crontab                 # Supercronic schedule
+├── docker-compose.yml      # 3 services (bot, ui, graph)
 data/json/                  # Tracked data files
 ├── portfolio.json          # Stock positions
 ├── watchlist.json          # Watchlist tickers
@@ -125,14 +124,11 @@ tests/                      # Test suite
 
 | Service | Purpose | Port |
 |---------|---------|------|
-| `idx-cron` | Scheduled fetcher + watchlist (weekdays, IDX market hours) | — |
+| `idx-graph` | LangGraph orchestrator (session-aware, signal-driven analysis) | — |
 | `idx-bot` | Telegram bot (long-polling) | — |
 | `idx-ui` | Streamlit dashboard | 8501 |
-| `idx-graph` | LangGraph orchestrator (signal-aware, replaces cron) | — |
 
 All services share the same image (`ghcr.io/marvello/my-stocks:latest`), `.env` config, and `data/` volume. Container runs as non-root user.
-
-> **Note:** `idx-graph` starts with `GRAPH_SEND_TELEGRAM=false` by default. Run it alongside `idx-cron` first to validate, then switch over by enabling Telegram and removing cron entries.
 
 ## CLI Options
 
@@ -186,21 +182,22 @@ python -m app.analyze_watchlist
 | `SIGNAL_COOLDOWN_MIN` | `15` | Minutes before re-analyzing same ticker |
 | `GRAPH_ACTIVE_INTERVAL` | `300` | Check interval (s) during market hours |
 | `GRAPH_IDLE_INTERVAL` | `1800` | Check interval (s) when market closed |
-| `GRAPH_SEND_TELEGRAM` | `false` | Enable Telegram in graph orchestrator |
+| `GRAPH_SEND_TELEGRAM` | `true` | Enable Telegram in graph orchestrator |
 
-## Cron Schedule (IDX Market Hours)
+## Monitoring Schedule
 
-**Portfolio analysis:**
-```
-Session 1:  09:05, 10:05, 11:05, 12:05 WIB (Mon-Fri)
-Session 2:  13:35, 14:35 WIB (Mon-Fri)
-Close:      15:05 WIB (Mon-Fri)
-```
+The LangGraph orchestrator (`idx-graph`) replaces cron with adaptive, signal-aware scheduling:
 
-**Watchlist analysis:**
-```
-08:30, 15:30 WIB (Mon-Fri)
-```
+| Session (WIB) | Interval | Behavior |
+|---------------|----------|----------|
+| 08:45–09:00 (Pre-market) | 15 min | Signal check, prepare ticker list |
+| 09:00–11:30 (Session 1) | 5 min | Active monitoring, signal detection |
+| 11:30–13:30 (Lunch) | 15 min | Signal check only, major signals trigger immediate analysis |
+| 13:30–15:00 (Session 2) | 5 min | Active monitoring, signal detection |
+| 15:00–15:30 (After hours) | 30 min | Deep fundamental analysis |
+| 15:30–08:45 (Closed) | 30 min | No analysis |
+
+**Signal-driven analysis:** Price moves >3% or volume spikes >1.5x trigger additional analysis. Major signals (>5% price, >3x volume) trigger immediate analysis regardless of schedule.
 
 ## Tech Stack
 
