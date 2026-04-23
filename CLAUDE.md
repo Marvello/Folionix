@@ -18,6 +18,14 @@ app/                        # Main application code
 ├── ui.py                   # Streamlit dashboard
 ├── utils.py                # Shared helpers
 ├── watchlist.py            # Watchlist business logic (shared by bot + UI)
+├── graph/                  # LangGraph orchestrator
+│   ├── __init__.py         # Package exports
+│   ├── state.py            # TypedDict state schemas + enums
+│   ├── session.py          # IDX market session detection (WIB time)
+│   ├── signals.py          # Signal detection (price move, volume spike)
+│   ├── analysis.py         # Inner graph: analysis pipeline per ticker
+│   ├── orchestrator.py     # Outer graph: session + signal routing
+│   └── runner.py           # Long-running entry point (SIGTERM-aware)
 docker/                     # Docker-related files
 ├── Dockerfile
 ├── docker-compose.yml
@@ -56,13 +64,16 @@ streamlit run app/ui.py --server.port 8501
 # Watchlist analysis
 python -m app.analyze_watchlist
 
+# LangGraph orchestrator (long-running, replaces cron)
+python -m app.graph.runner
+
 # Tests
 pytest tests/ -v
 ```
 
 ## Docker
 
-Three services in `docker/docker-compose.yml`: `idx-cron` (supercronic), `idx-bot` (Telegram), `idx-ui` (Streamlit on 8501). All share `.env` and `data/` volume.
+Four services in `docker/docker-compose.yml`: `idx-cron` (supercronic), `idx-bot` (Telegram), `idx-ui` (Streamlit on 8501), `idx-graph` (LangGraph orchestrator). All share `.env` and `data/` volume.
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
@@ -77,6 +88,7 @@ CI/CD: GitHub Actions builds and pushes image to `ghcr.io/marvello/my-stocks:lat
 ```
 app/fetch_portfolio.py  →  yfinance → Ollama LLM → Telegram alerts
 app/analyze_watchlist.py →  yfinance → Ollama LLM → Telegram alerts
+app/graph/runner.py     →  LangGraph orchestrator (session-aware, signal-driven)
        ↓ (saves)
      app/db.py  ←→  SQLite (data/app.db) / PostgreSQL
        ↑ (reads)
@@ -84,19 +96,20 @@ app/analyze_watchlist.py →  yfinance → Ollama LLM → Telegram alerts
      app/ui.py   ←→  Streamlit dashboard (Dashboard + portfolio CRUD, Watchlist + watchlist CRUD, History, Analysis Log, Accuracy)
 ```
 
-- **app/fetch_portfolio.py**: Data pipeline. Fetches stock prices, builds Indonesian-language LLM prompts, calls Ollama `/api/chat`, cleans HTML output, saves snapshots + analyses to DB, sends Telegram alerts.
+- **app/fetch_portfolio.py**: Data pipeline. Fetches stock prices, builds Indonesian-language LLM prompts (with `depth` parameter: LIGHT/FULL/DEEP), calls Ollama `/api/chat`, cleans HTML output, saves snapshots + analyses to DB, sends Telegram alerts.
 - **app/analyze_watchlist.py**: Same pipeline for watchlist tickers (not owned). Produces BUY SEKARANG / TUNGGU / HINDARI verdicts.
 - **app/db.py**: SQLAlchemy Core (not ORM). Tables: `stock_snapshots`, `llm_analyses`, `portfolio_positions`. SQLite default with WAL mode, PostgreSQL-ready.
 - **app/bot.py**: Telegram long-polling with chat ID whitelisting. /add only adds new, /update only modifies existing. Watchlist commands: /wadd TICKER [notes] — add ticker to watchlist; /wremove TICKER — remove ticker from watchlist; /wlist — show current watchlist.
 - **app/ui.py**: Streamlit multi-page: Dashboard (+ portfolio CRUD), Watchlist (+ watchlist CRUD), History, Analysis Log, Accuracy.
 - **app/watchlist.py**: Shared watchlist business logic (add, remove, list, AI suggest) used by both bot and UI.
 - **app/utils.py**: Shared helpers (formatting, timezone, version, atomic JSON writes, JSON schema validation).
+- **app/graph/**: LangGraph orchestrator. Two graphs: outer orchestrator (session detection → signal monitoring → routing) and inner analysis pipeline (fan-out per ticker → fetch → LLM → save → alert). Wraps existing pipeline functions as thin graph nodes. Runs as long-running process with SIGTERM handling. Replaces cron scheduling with signal-aware, market-session-aware monitoring (5-min intervals during market hours, 30-min idle).
 
 ## Key Configuration
 
 - **data/json/portfolio.json**: Source of truth for stock positions (ticker, avg_price, lots, active, notes). 1 lot = 100 shares.
 - **data/json/watchlist.json**: Watchlist tickers (user-added and AI-suggested). Mutually exclusive with portfolio.
-- **.env**: `OLLAMA_URL`, `OLLAMA_MODEL`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `CACHE_MINUTES`, `ACTION_THRESHOLD_IDR`, `SEND_TELEGRAM`
+- **.env**: `OLLAMA_URL`, `OLLAMA_MODEL`, `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `CACHE_MINUTES`, `ACTION_THRESHOLD_IDR`, `SEND_TELEGRAM`, `SIGNAL_PRICE_MINOR`, `SIGNAL_PRICE_MAJOR`, `SIGNAL_VOLUME_MINOR`, `SIGNAL_VOLUME_MAJOR`, `SIGNAL_COOLDOWN_MIN`, `GRAPH_ACTIVE_INTERVAL`, `GRAPH_IDLE_INTERVAL`, `GRAPH_SEND_TELEGRAM`
 - IDX tickers auto-append `.JK` suffix for yfinance
 - All timestamps stored UTC, displayed in WIB (Asia/Jakarta, UTC+7)
 - All imports use `app.` prefix (e.g., `from app.db import init_db`)

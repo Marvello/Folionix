@@ -12,15 +12,15 @@ Automated Indonesian stock portfolio tracker with LLM-powered analysis, Telegram
 
 ```
 ┌─────────────┐     ┌──────────┐     ┌─────────┐     ┌──────────────┐
-│   yfinance   │────▶│  Ollama  │────▶│ Telegram │     │  Streamlit   │
-│  (IDX data)  │     │  (LLM)   │     │  alerts  │     │  dashboard   │
+│   yfinance  │────▶│  Ollama  │────▶│ Telegram│     │  Streamlit   │
+│  (IDX data) │     │  (LLM)   │     │  alerts │     │  dashboard   │
 └─────────────┘     └──────────┘     └─────────┘     └──────────────┘
-       │                  │                                   │
-       └──────────────────┴───────────┬───────────────────────┘
-                                      ▼
-                               ┌─────────────┐
-                               │   SQLite DB  │
-                               └─────────────┘
+       │                 │                                  │
+       └─────────────────┴──────────┬───────────────────────┘
+                                    ▼
+                             ┌─────────────┐
+                             │   SQLite DB │
+                             └─────────────┘
 ```
 
 - **Fetches** real-time IDX stock prices via Yahoo Finance
@@ -104,9 +104,16 @@ app/                        # Application code
 ├── ui.py                   # Streamlit dashboard
 ├── utils.py                # Shared helpers
 ├── watchlist.py            # Watchlist business logic (shared by bot + UI)
+├── graph/                  # LangGraph orchestrator
+│   ├── state.py            # State schemas + enums
+│   ├── session.py          # Market session detection
+│   ├── signals.py          # Signal detection (price/volume)
+│   ├── analysis.py         # Analysis pipeline graph
+│   ├── orchestrator.py     # Session + signal routing graph
+│   └── runner.py           # Long-running entry point
 docker/                     # Docker config
 ├── Dockerfile              # Multi-service image
-├── docker-compose.yml      # 3 services (cron, bot, ui)
+├── docker-compose.yml      # 4 services (cron, bot, ui, graph)
 ├── crontab                 # Supercronic schedule
 data/json/                  # Tracked data files
 ├── portfolio.json          # Stock positions
@@ -121,8 +128,11 @@ tests/                      # Test suite
 | `idx-cron` | Scheduled fetcher + watchlist (weekdays, IDX market hours) | — |
 | `idx-bot` | Telegram bot (long-polling) | — |
 | `idx-ui` | Streamlit dashboard | 8501 |
+| `idx-graph` | LangGraph orchestrator (signal-aware, replaces cron) | — |
 
 All services share the same image (`ghcr.io/marvello/my-stocks:latest`), `.env` config, and `data/` volume. Container runs as non-root user.
+
+> **Note:** `idx-graph` starts with `GRAPH_SEND_TELEGRAM=false` by default. Run it alongside `idx-cron` first to validate, then switch over by enabling Telegram and removing cron entries.
 
 ## CLI Options
 
@@ -169,6 +179,14 @@ python -m app.analyze_watchlist
 | `ACTION_THRESHOLD_IDR` | `1000000` | Min P&L (Rp) to trigger action recommendation |
 | `DATABASE_URL` | `sqlite:///./data/app.db` | DB connection string |
 | `UI_PASSWORD` | — | Optional Streamlit login password |
+| `SIGNAL_PRICE_MINOR` | `3.0` | Price move % to trigger minor signal |
+| `SIGNAL_PRICE_MAJOR` | `5.0` | Price move % to trigger major signal |
+| `SIGNAL_VOLUME_MINOR` | `1.5` | Volume ratio for minor signal |
+| `SIGNAL_VOLUME_MAJOR` | `3.0` | Volume ratio for major signal |
+| `SIGNAL_COOLDOWN_MIN` | `15` | Minutes before re-analyzing same ticker |
+| `GRAPH_ACTIVE_INTERVAL` | `300` | Check interval (s) during market hours |
+| `GRAPH_IDLE_INTERVAL` | `1800` | Check interval (s) when market closed |
+| `GRAPH_SEND_TELEGRAM` | `false` | Enable Telegram in graph orchestrator |
 
 ## Cron Schedule (IDX Market Hours)
 
@@ -187,11 +205,12 @@ Close:      15:05 WIB (Mon-Fri)
 ## Tech Stack
 
 - **Data:** yfinance, pandas
-- **LLM:** Ollama (local, any model)
+- **LLM:** Ollama (local, any model — qwen2.5:7b, gemma4)
+- **Orchestration:** LangGraph (session-aware, signal-driven)
 - **Database:** SQLAlchemy Core → SQLite (PostgreSQL-ready)
 - **Bot:** Telegram Bot API (raw HTTP, no framework)
 - **UI:** Streamlit
-- **Scheduler:** supercronic (in Docker)
+- **Scheduler:** supercronic (in Docker), LangGraph orchestrator
 - **CI/CD:** GitHub Actions → GHCR
 
 ## License
