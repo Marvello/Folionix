@@ -70,3 +70,66 @@ def test_build_prompt_returns_string():
     assert isinstance(result, str)
     assert "BBCA" in result
     assert "Bank BCA" in result
+
+
+def test_build_prompt_light_depth():
+    mock_data = {
+        "ticker": "BBCA", "name": "Bank BCA", "sector": "Finance",
+        "industry": "Banking", "notes": "Blue chip",
+        "current_price": 9000, "day_arrow": "▲", "day_change_pct": 1.5,
+        "volume": 50000, "high_52w": 10000, "low_52w": 7000,
+        "avg_price": 8000, "lots": 10, "total_pnl": 1000000,
+        "unrealized_pnl": 1000, "unrealized_pnl_pct": 12.5,
+        "position_status": "🟢 PROFIT", "dist_from_high": -10,
+        "dist_from_low": 28.6, "pnl_arrow": "📈",
+        "pe": 15.0, "pb": 3.0, "beta": 1.1,
+        "roe_pct": 20.0, "profit_margin_pct": 30.0,
+        "div_yield_pct": 2.5, "eps": 600, "debt_to_equity": 0.5,
+        "market_cap": "Rp 500.00 T", "fetched_at_display": "21 Apr 2026 09:00 WIB",
+    }
+    result = build_prompt(mock_data, depth="LIGHT")
+    assert "BBCA" in result
+    assert "FUNDAMENTALS" not in result
+    assert "Maximum 100 words" in result
+
+
+def test_build_prompt_deep_depth():
+    mock_data = {
+        "ticker": "BBCA", "name": "Bank BCA", "sector": "Finance",
+        "industry": "Banking", "notes": "Blue chip",
+        "current_price": 9000, "day_arrow": "▲", "day_change_pct": 1.5,
+        "volume": 50000, "high_52w": 10000, "low_52w": 7000,
+        "avg_price": 8000, "lots": 10, "total_pnl": 1000000,
+        "unrealized_pnl": 1000, "unrealized_pnl_pct": 12.5,
+        "position_status": "🟢 PROFIT", "dist_from_high": -10,
+        "dist_from_low": 28.6, "pnl_arrow": "📈",
+        "pe": 15.0, "pb": 3.0, "beta": 1.1,
+        "roe_pct": 20.0, "profit_margin_pct": 30.0,
+        "div_yield_pct": 2.5, "eps": 600, "debt_to_equity": 0.5,
+        "market_cap": "Rp 500.00 T", "fetched_at_display": "21 Apr 2026 09:00 WIB",
+    }
+    result = build_prompt(mock_data, depth="DEEP")
+    assert "BBCA" in result
+    assert "FUNDAMENTALS" in result
+    assert "Maximum 300 words" in result
+    assert "sector comparison" in result.lower() or "Sector Comparison" in result
+
+
+def test_build_prompt_default_depth_unchanged():
+    mock_data = {
+        "ticker": "BBCA", "name": "Bank BCA", "sector": "Finance",
+        "industry": "Banking", "notes": "Blue chip",
+        "current_price": 9000, "day_arrow": "▲", "day_change_pct": 1.5,
+        "volume": 50000, "high_52w": 10000, "low_52w": 7000,
+        "avg_price": 8000, "lots": 10, "total_pnl": 1000000,
+        "unrealized_pnl": 1000, "unrealized_pnl_pct": 12.5,
+        "position_status": "🟢 PROFIT", "dist_from_high": -10,
+        "dist_from_low": 28.6, "pnl_arrow": "📈",
+        "pe": 15.0, "pb": 3.0, "beta": 1.1,
+        "roe_pct": 20.0, "profit_margin_pct": 30.0,
+        "div_yield_pct": 2.5, "eps": 600, "debt_to_equity": 0.5,
+        "market_cap": "Rp 500.00 T", "fetched_at_display": "21 Apr 2026 09:00 WIB",
+    }
+    result = build_prompt(mock_data, depth="FULL")
+    assert "FUNDAMENTALS" in result
+    assert "Maximum 200 words" in result

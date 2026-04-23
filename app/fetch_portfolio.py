@@ -236,7 +236,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
 # ──────────────────────────────────────────────
 # STEP 2 — BUILD PROMPT
 # ──────────────────────────────────────────────
-def build_prompt(d: dict, history: list[dict] | None = None) -> str:
+def build_prompt(d: dict, history: list[dict] | None = None, depth: str = "FULL") -> str:
     now = now_wib()  # from utils — returns WIB-aware datetime
     hour = now.hour
     minute = now.minute
@@ -291,6 +291,32 @@ INVESTOR POSITION:
             trend_lines.append(f"- {ts_str}: Rp {price:,.0f} ({day_str})")
         trend_block = "\n".join(trend_lines)
 
+    # ── Depth-aware variables ──
+    if depth == "LIGHT":
+        fundamentals_block = ""
+        word_limit = 100
+        extra_instructions = ""
+    elif depth == "DEEP":
+        fundamentals_block = f"""
+FUNDAMENTALS:
+- P/E: {d['pe']}x | P/B: {d['pb']}x | Beta: {d['beta']}
+- ROE: {d['roe_pct']}% | Profit Margin: {d['profit_margin_pct']}%
+- Dividend Yield: {d['div_yield_pct']}% | EPS: {fmt_idr(d['eps'], 2)}
+- Debt/Equity: {d['debt_to_equity']} | Market Cap: {d['market_cap']}
+"""
+        word_limit = 300
+        extra_instructions = "Include a Sector Comparison section: how does this stock compare to sector peers?\n"
+    else:  # FULL (default)
+        fundamentals_block = f"""
+FUNDAMENTALS:
+- P/E: {d['pe']}x | P/B: {d['pb']}x | Beta: {d['beta']}
+- ROE: {d['roe_pct']}% | Profit Margin: {d['profit_margin_pct']}%
+- Dividend Yield: {d['div_yield_pct']}% | EPS: {fmt_idr(d['eps'], 2)}
+- Debt/Equity: {d['debt_to_equity']} | Market Cap: {d['market_cap']}
+"""
+        word_limit = 200
+        extra_instructions = ""
+
     return f"""You are an IDX stock analyst helping a retail investor decide BUY/SELL/HOLD in real-time.
 
 === MARKET SESSION: {session} ===
@@ -304,20 +330,14 @@ PRICE:
 - Volume   : {f"{d['volume']:,}" if d.get('volume') else "N/A"} lots
 - 52W High : {fmt_idr(d['high_52w'])} | 52W Low: {fmt_idr(d['low_52w'])}
 {pnl_block}
-
-FUNDAMENTALS:
-- P/E: {d['pe']}x | P/B: {d['pb']}x | Beta: {d['beta']}
-- ROE: {d['roe_pct']}% | Profit Margin: {d['profit_margin_pct']}%
-- Dividend Yield: {d['div_yield_pct']}% | EPS: {fmt_idr(d['eps'], 2)}
-- Debt/Equity: {d['debt_to_equity']} | Market Cap: {d['market_cap']}
-
+{fundamentals_block}
 {trend_block}
 
 FORMAT INSTRUCTIONS:
 Write ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
 Do NOT use Markdown (**, ##, -, *). Do NOT write ```html or ```.
-Maximum 200 words.
-
+Maximum {word_limit} words.
+{extra_instructions}
 REQUIRED FORMAT (fill in the bracketed sections):
 
 <b>{d['ticker']} {d['pnl_arrow']} {d['position_status']}</b>
