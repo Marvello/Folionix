@@ -60,3 +60,19 @@ services:
     labels:
       - "com.dockflare.enable=true"
       - "com.dockflare.hostname=idx-portfolio"
+
+  # ── LangGraph orchestrator ──
+  idx-graph:
+    image: ghcr.io/marvello/my-stocks:latest
+    container_name: idx-graph
+    restart: unless-stopped
+    user: root
+    env_file: ../.env
+    environment:
+      - TZ=Asia/Jakarta
+      - GRAPH_SEND_TELEGRAM=false
+    volumes:
+      - ../data:/project/data
+    extra_hosts:
+      - "debian-tower:host-gateway"
+    command: python -m app.graph.runner
