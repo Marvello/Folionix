@@ -27,8 +27,10 @@ def test_news_sentiments_table_exists():
 
 # ── NEWS FETCH + CACHE TESTS ──
 
+import json
 from unittest.mock import patch, MagicMock
-from app.news import fetch_company_news, fetch_macro_news, get_cached_news
+from sqlalchemy import select
+from app.news import fetch_company_news, fetch_macro_news, get_cached_news, summarize_news
 
 
 MOCK_RSS_FEED = MagicMock()
@@ -97,3 +99,69 @@ def test_fetch_macro_news(mock_parse, mock_sleep):
     articles = fetch_macro_news()
     assert len(articles) >= 1
     assert articles[0]["ticker"] is None
+
+
+# ── SENTIMENT SUMMARIZATION TESTS ──
+
+MOCK_OLLAMA_RESPONSE = {
+    "message": {
+        "content": json.dumps({
+            "score": 3,
+            "themes": ["laba bersih naik", "ekspansi kredit digital"],
+            "catalyst": "BI rate cut diharapkan bulan depan",
+            "risk": "foreign fund outflow meningkat",
+        })
+    }
+}
+
+
+@patch("app.news.time.sleep")
+@patch("app.news.requests.post")
+@patch("app.news.feedparser.parse", return_value=MOCK_RSS_FEED)
+def test_summarize_news_returns_sentiment(mock_parse, mock_post, mock_sleep):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = MOCK_OLLAMA_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+    mock_post.return_value = mock_resp
+
+    init_db()
+    fetch_company_news("BBCA")
+    articles = get_cached_news("BBCA")
+    result = summarize_news("BBCA", articles, depth="FULL")
+
+    assert result is not None
+    assert result["score"] == 3
+    assert len(result["themes"]) == 2
+    assert result["catalyst"] is not None
+
+
+@patch("app.news.requests.post")
+def test_summarize_news_empty_articles(mock_post):
+    init_db()
+    result = summarize_news("BBCA", [], depth="FULL")
+    assert result is None
+    mock_post.assert_not_called()
+
+
+@patch("app.news.time.sleep")
+@patch("app.news.requests.post")
+@patch("app.news.feedparser.parse", return_value=MOCK_RSS_FEED)
+def test_summarize_news_caches_result(mock_parse, mock_post, mock_sleep):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = MOCK_OLLAMA_RESPONSE
+    mock_resp.raise_for_status = MagicMock()
+    mock_post.return_value = mock_resp
+
+    init_db()
+    fetch_company_news("BBCA")
+    articles = get_cached_news("BBCA")
+    summarize_news("BBCA", articles, depth="FULL")
+
+    with get_engine().connect() as conn:
+        rows = conn.execute(
+            select(news_sentiments).where(news_sentiments.c.ticker == "BBCA")
+        ).fetchall()
+    assert len(rows) >= 1
+    assert rows[0]._mapping["score"] == 3

@@ -5,6 +5,7 @@ Fetches news from Google News RSS and Indonesian financial RSS feeds.
 Caches articles in SQLite. Summarizes via Ollama for sentiment injection.
 """
 
+import json
 import logging
 import os
 import time
@@ -12,6 +13,7 @@ from calendar import timegm
 from datetime import datetime, timedelta, timezone
 
 import feedparser
+import requests
 from sqlalchemy import select
 
 from app.db import get_engine, news_cache, news_sentiments
@@ -20,6 +22,10 @@ log = logging.getLogger(__name__)
 
 NEWS_CACHE_HOURS = int(os.getenv("NEWS_CACHE_HOURS", "4"))
 NEWS_FETCH_ENABLED = os.getenv("NEWS_FETCH_ENABLED", "true").lower() == "true"
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+ARTICLE_LIMITS = {"LIGHT": 3, "FULL": 5, "DEEP": 10}
 
 GOOGLE_NEWS_BASE = "https://news.google.com/rss/search?hl=id&gl=ID&ceid=ID:id&q="
 
@@ -181,3 +187,122 @@ def prune_old_news(days: int = 7) -> int:
             news_cache.delete().where(news_cache.c.fetched_at < cutoff)
         )
         return result.rowcount
+
+
+# ── SENTIMENT SUMMARIZATION ──
+
+def _build_sentiment_prompt(ticker: str, articles: list[dict], depth: str) -> str:
+    """Build an Indonesian-language sentiment analysis prompt for the given articles."""
+    limit = ARTICLE_LIMITS.get(depth, 5)
+    selected = articles[:limit]
+    include_summary = depth != "LIGHT"
+    news_lines = []
+    for i, a in enumerate(selected, 1):
+        line = f"{i}. {a['headline']}"
+        if include_summary and a.get("summary"):
+            line += f"\n   {a['summary'][:200]}"
+        news_lines.append(line)
+    news_block = "\n".join(news_lines)
+    return f"""Kamu adalah analis berita pasar saham Indonesia. Analisis berita berikut untuk ticker {ticker}.
+
+BERITA:
+{news_block}
+
+Berikan ringkasan sentiment dalam format JSON berikut (HANYA JSON, tanpa teks lain):
+{{
+  "score": <integer -5 sampai +5, 0=netral, positif=bullish, negatif=bearish>,
+  "themes": [<2-3 tema utama dalam bahasa Indonesia>],
+  "catalyst": <katalis positif utama atau null>,
+  "risk": <risiko utama atau null>
+}}"""
+
+
+def _get_cached_sentiment(ticker: str, depth: str, max_age_hours: int = NEWS_CACHE_HOURS) -> dict | None:
+    """Return a recent cached sentiment result from DB, or None if not found."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            select(news_sentiments)
+            .where(news_sentiments.c.ticker == ticker.upper())
+            .where(news_sentiments.c.depth == depth)
+            .where(news_sentiments.c.summarized_at >= cutoff)
+            .order_by(news_sentiments.c.summarized_at.desc())
+            .limit(1)
+        ).fetchone()
+        if row:
+            data = dict(row._mapping)
+            return {
+                "score": data["score"],
+                "themes": json.loads(data["themes"]) if data["themes"] else [],
+                "catalyst": data["catalyst"],
+                "risk": data["risk"],
+            }
+    return None
+
+
+def _save_sentiment(ticker: str, depth: str, sentiment: dict, raw_output: str) -> None:
+    """Persist a sentiment result to the news_sentiments table."""
+    with get_engine().begin() as conn:
+        conn.execute(
+            news_sentiments.insert().values(
+                ticker=ticker.upper(),
+                summarized_at=datetime.now(timezone.utc),
+                depth=depth,
+                score=sentiment["score"],
+                themes=json.dumps(sentiment.get("themes", []), ensure_ascii=False),
+                catalyst=sentiment.get("catalyst"),
+                risk=sentiment.get("risk"),
+                raw_output=raw_output,
+            )
+        )
+
+
+def summarize_news(ticker: str, articles: list[dict], depth: str = "FULL") -> dict | None:
+    """
+    Summarize news sentiment for a ticker by calling Ollama LLM.
+
+    Returns a dict with keys: score, themes, catalyst, risk.
+    Returns None if articles is empty, Ollama is unreachable, or parsing fails.
+    Uses cached result from DB if available within NEWS_CACHE_HOURS.
+    """
+    if not articles:
+        return None
+    cached = _get_cached_sentiment(ticker, depth)
+    if cached:
+        return cached
+    prompt = _build_sentiment_prompt(ticker, articles, depth)
+    try:
+        resp = requests.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "stream": False,
+                "options": {"temperature": 0.2, "num_predict": 512, "num_ctx": 4096},
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Kamu adalah analis berita saham. Jawab HANYA dalam format JSON.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+            },
+            timeout=60,
+        )
+        resp.raise_for_status()
+        raw_text = (resp.json().get("message") or {}).get("content", "")
+        sentiment = json.loads(raw_text)
+        score = max(-5, min(5, int(sentiment.get("score", 0))))
+        result = {
+            "score": score,
+            "themes": sentiment.get("themes", [])[:3],
+            "catalyst": sentiment.get("catalyst"),
+            "risk": sentiment.get("risk"),
+        }
+        _save_sentiment(ticker, depth, result, raw_text)
+        return result
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        log.warning(f"Failed to parse sentiment for {ticker}: {e}")
+        return None
+    except Exception as e:
+        log.error(f"Sentiment summarization failed for {ticker}: {e}")
+        return None
