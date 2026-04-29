@@ -9,6 +9,7 @@ from langgraph.graph import StateGraph
 from app.db import init_db, get_latest_snapshot, get_snapshots
 from app.fetch_portfolio import load_portfolio
 from app.graph.analysis import build_analysis_graph, decide_depth
+from app.news import fetch_company_news, fetch_macro_news, prune_old_news, NEWS_FETCH_ENABLED
 from app.graph.session import detect_session
 from app.graph.signals import detect_signals_for_ticker
 from app.graph.state import (
@@ -71,6 +72,39 @@ def is_on_cooldown(ticker: str, last_run: dict[str, datetime], cooldown_min: int
         return False
     elapsed = (datetime.now(timezone.utc) - last).total_seconds() / 60
     return elapsed < cooldown_min
+
+
+NEWS_FETCH_INTERVAL_HOURS = int(os.getenv("NEWS_CACHE_HOURS", "4"))
+
+
+def should_fetch_news(last_fetch: datetime, interval_hours: int = NEWS_FETCH_INTERVAL_HOURS) -> bool:
+    """Check if enough time has passed for a news fetch."""
+    elapsed = (datetime.now(timezone.utc) - last_fetch).total_seconds() / 3600
+    return elapsed >= interval_hours
+
+
+def _node_fetch_news(state: OrchestratorState) -> dict:
+    """Fetch news for all active tickers + macro news."""
+    if not NEWS_FETCH_ENABLED:
+        return {}
+
+    last_fetch = state.get("last_news_fetch", datetime.min.replace(tzinfo=timezone.utc))
+    session = state["current_session"]
+
+    interval = 2 if session in (Session.SESSION_1, Session.SESSION_2) else NEWS_FETCH_INTERVAL_HOURS
+
+    if not should_fetch_news(last_fetch, interval_hours=interval):
+        return {}
+
+    log.info("Fetching news for all tickers...")
+    portfolio = load_portfolio()
+    for ticker in portfolio:
+        fetch_company_news(ticker)
+
+    fetch_macro_news()
+    prune_old_news()
+
+    return {"last_news_fetch": datetime.now(timezone.utc)}
 
 
 def _node_detect_session(state: OrchestratorState) -> dict:
@@ -182,8 +216,11 @@ def build_orchestrator_graph():
     graph.add_node("run_analysis", _node_run_analysis)
     graph.add_node("skip", _node_skip)
 
+    graph.add_node("fetch_news", _node_fetch_news)
+
     graph.add_edge("__start__", "detect_session")
-    graph.add_edge("detect_session", "check_signals")
+    graph.add_edge("detect_session", "fetch_news")
+    graph.add_edge("fetch_news", "check_signals")
     graph.add_edge("check_signals", "route")
     graph.add_conditional_edges(
         "route",

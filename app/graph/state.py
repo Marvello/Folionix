@@ -53,6 +53,7 @@ class OrchestratorState(TypedDict):
     signals: list[TickerSignal]
     pending_batch: list[str]
     last_run: dict[str, datetime]
+    last_news_fetch: datetime
     _route: str
 
 
@@ -71,5 +72,6 @@ def initial_orchestrator_state() -> OrchestratorState:
         signals=[],
         pending_batch=[],
         last_run={},
+        last_news_fetch=datetime.min.replace(tzinfo=timezone.utc),
         _route="skip",
     )
