@@ -109,7 +109,7 @@ def _send_request(text: str, max_retries: int = 3) -> bool:
 
 
 # ── Prompt builder for watchlist analysis ────────────────────────────────────
-def build_watchlist_prompt(data: dict, rationale: str = "", source: str = "user") -> str:
+def build_watchlist_prompt(data: dict, rationale: str = "", source: str = "user", news_sentiment: dict | None = None) -> str:
     """Build Indonesian-language prompt for watchlist stock analysis."""
     ticker = data["ticker"]
     price = data.get("current_price")
@@ -133,6 +133,32 @@ def build_watchlist_prompt(data: dict, rationale: str = "", source: str = "user"
 
     price_str = fmt_idr(price) if price else "N/A"
 
+    news_block = ""
+    if news_sentiment:
+        score = news_sentiment.get("score", 0)
+        if score > 0:
+            label = "Bullish"
+        elif score < 0:
+            label = "Bearish"
+        else:
+            label = "Neutral"
+        themes_str = ", ".join(news_sentiment.get("themes", []))
+        news_lines = [
+            "NEWS SENTIMENT (auto-generated):",
+            f"- Sentiment: {'+' if score > 0 else ''}{score}/5 ({label})",
+        ]
+        if themes_str:
+            news_lines.append(f"- Themes: {themes_str}")
+        if news_sentiment.get("catalyst"):
+            news_lines.append(f"- Catalyst: {news_sentiment['catalyst']}")
+        if news_sentiment.get("risk"):
+            news_lines.append(f"- Risk: {news_sentiment['risk']}")
+        news_block = "\n".join(news_lines)
+
+    news_instruction = ""
+    if news_sentiment:
+        news_instruction = "Use the news sentiment data to inform your Catalysts & Risks section and final verdict.\n"
+
     return f"""You are a senior IDX stock analyst. This is a WATCHLIST stock (not yet owned), not an active portfolio position.
 
 Stock    : {ticker} ({name})
@@ -145,6 +171,7 @@ P/E      : {pe}x
 P/B      : {pb}x
 ROE      : {roe}%
 Div Yield: {div_yield}%
+{news_block}
 
 Provide a concise analysis in the following format:
 1. **Technical** (2-3 sentences: price trend, position vs 52W range)
@@ -157,7 +184,7 @@ Criteria:
 - WAIT: fundamentals OK but no breakout yet or still sideways
 - AVOID: overbought, weak fundamentals, or high risk
 
-FORMAT INSTRUCTIONS:
+{news_instruction}FORMAT INSTRUCTIONS:
 Write ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
 Do NOT use Markdown (**, ##, -, *). Do NOT write ```html or ```.
 Maximum 150 words. Go straight to the point. No lengthy disclaimers.
