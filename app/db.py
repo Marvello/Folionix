@@ -97,6 +97,35 @@ llm_analyses = Table(
     Column("skipped_same",    Integer, default=0),   # 1 if skipped because same as previous
 )
 
+# News cache — one row per article per fetch
+news_cache = Table(
+    "news_cache", metadata,
+    Column("id",           Integer, primary_key=True, autoincrement=True),
+    Column("fetched_at",   DateTime, nullable=False, index=True),
+    Column("ticker",       String(10), nullable=True, index=True),
+    Column("source",       String(50), nullable=False),
+    Column("headline",     String(500), nullable=False),
+    Column("summary",      Text),
+    Column("url",          String(500), nullable=False),
+    Column("published_at", DateTime),
+    Column("language",     String(5), default="id"),
+    UniqueConstraint("url", name="uq_news_url"),
+)
+
+# LLM-generated news sentiment — one row per ticker per summarization
+news_sentiments = Table(
+    "news_sentiments", metadata,
+    Column("id",            Integer, primary_key=True, autoincrement=True),
+    Column("ticker",        String(10), nullable=False, index=True),
+    Column("summarized_at", DateTime, nullable=False, index=True),
+    Column("depth",         String(10), nullable=False),
+    Column("score",         Integer, nullable=False),
+    Column("themes",        Text),
+    Column("catalyst",      Text),
+    Column("risk",          Text),
+    Column("raw_output",    Text),
+)
+
 # Portfolio positions (source of truth — mirrors portfolio.json)
 portfolio_positions = Table(
     "portfolio_positions", metadata,
