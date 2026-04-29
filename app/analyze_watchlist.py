@@ -30,6 +30,7 @@ from app.utils import (
     fmt_idr, fmt_cap, safe_float, normalize_ticker,
     now_wib, get_version, get_version_url,
 )
+from app.news import fetch_company_news, get_cached_news, summarize_news, NEWS_FETCH_ENABLED
 
 load_dotenv()
 
@@ -251,7 +252,16 @@ def analyze_watchlist(source_filter: str = "all") -> None:
         if not data.get("from_cache"):
             snapshot_id = save_snapshot(data)
 
-        prompt = build_watchlist_prompt(data, rationale=rationale, source=source)
+        news_sentiment = None
+        if NEWS_FETCH_ENABLED:
+            cached_news = get_cached_news(ticker)
+            if not cached_news:
+                fetch_company_news(ticker)
+                cached_news = get_cached_news(ticker)
+            if cached_news:
+                news_sentiment = summarize_news(ticker, cached_news)
+
+        prompt = build_watchlist_prompt(data, rationale=rationale, source=source, news_sentiment=news_sentiment)
         raw_llm = call_ollama(prompt)
         clean = clean_for_telegram(raw_llm)
         verdict = extract_watchlist_verdict(clean)
