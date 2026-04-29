@@ -22,6 +22,7 @@ from app.graph.state import (
     SignalTier,
     TickerResult,
 )
+from app.news import fetch_company_news, get_cached_news, summarize_news, NEWS_FETCH_ENABLED
 
 log = logging.getLogger(__name__)
 
@@ -54,10 +55,10 @@ def fetch_and_snapshot(
     return data, snapshot_id, None
 
 
-def build_and_call_llm(data: dict, depth: Depth) -> str:
+def build_and_call_llm(data: dict, depth: Depth, news_sentiment: dict | None = None) -> str:
     """Build prompt with depth and call Ollama. Returns raw LLM output."""
     history = get_snapshots(data["ticker"], limit=5)
-    prompt = build_prompt(data, history=history, depth=depth.value)
+    prompt = build_prompt(data, history=history, depth=depth.value, news_sentiment=news_sentiment)
     return call_ollama(prompt)
 
 
@@ -119,7 +120,17 @@ def _node_analyze_ticker(state: AnalysisState) -> AnalysisState:
             continue
 
         depth = state.get("depth", Depth.FULL)
-        raw_llm = build_and_call_llm(data, depth)
+
+        news_sentiment = None
+        if NEWS_FETCH_ENABLED:
+            cached_news = get_cached_news(ticker)
+            if not cached_news:
+                fetch_company_news(ticker)
+                cached_news = get_cached_news(ticker)
+            if cached_news:
+                news_sentiment = summarize_news(ticker, cached_news, depth=depth.value)
+
+        raw_llm = build_and_call_llm(data, depth, news_sentiment=news_sentiment)
         result = process_output(
             ticker=ticker,
             snapshot_id=snapshot_id,
