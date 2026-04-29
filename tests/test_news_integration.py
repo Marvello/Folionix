@@ -171,3 +171,54 @@ def test_build_watchlist_prompt_news_instruction():
     sentiment = {"score": 1, "themes": [], "catalyst": None, "risk": None}
     prompt = build_watchlist_prompt(WATCHLIST_DATA, news_sentiment=sentiment)
     assert "Use the news sentiment" in prompt
+
+
+# ── Task 12: End-to-end pipeline integration test ────────────────────────────
+
+from unittest.mock import patch, MagicMock
+from app.db import init_db
+
+
+def test_full_news_pipeline_mock():
+    """End-to-end: fetch → summarize → inject into prompt."""
+    init_db()
+
+    mock_feed = MagicMock()
+    mock_feed.bozo = False
+    mock_feed.entries = [
+        MagicMock(
+            title="BBCA laba bersih naik 15%",
+            summary="Kinerja solid di Q1 2026",
+            link="https://example.com/bbca-q1-e2e",
+            published_parsed=(2026, 4, 29, 8, 0, 0, 0, 0, 0),
+        ),
+    ]
+
+    mock_ollama_resp = MagicMock()
+    mock_ollama_resp.status_code = 200
+    mock_ollama_resp.json.return_value = {
+        "message": {
+            "content": '{"score": 4, "themes": ["laba naik 15%"], "catalyst": "kinerja Q1 solid", "risk": null}'
+        }
+    }
+    mock_ollama_resp.raise_for_status = MagicMock()
+
+    with patch("app.news.feedparser.parse", return_value=mock_feed):
+        with patch("app.news.requests.post", return_value=mock_ollama_resp):
+            with patch("app.news.time.sleep"):
+                from app.news import fetch_company_news, get_cached_news, summarize_news
+
+                # Use BMRI to avoid cache collision with BBCA from test_news.py
+                fetch_company_news("BMRI")
+                articles = get_cached_news("BMRI")
+                assert len(articles) >= 1
+
+                sentiment = summarize_news("BMRI", articles, depth="FULL")
+                assert sentiment is not None
+                assert sentiment["score"] == 4
+
+                prompt = build_prompt(SAMPLE_DATA, news_sentiment=sentiment)
+                assert "NEWS SENTIMENT" in prompt
+                assert "+4" in prompt
+                assert "laba naik 15%" in prompt
+                assert "kinerja Q1 solid" in prompt
