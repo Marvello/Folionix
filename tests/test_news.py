@@ -165,3 +165,55 @@ def test_summarize_news_caches_result(mock_parse, mock_post, mock_sleep):
         ).fetchall()
     assert len(rows) >= 1
     assert rows[0]._mapping["score"] == 3
+
+
+# ── GRACEFUL DEGRADATION TESTS ──
+
+@patch("app.news.time.sleep")
+@patch("app.news.feedparser.parse")
+def test_fetch_company_news_rss_error(mock_parse, mock_sleep):
+    """RSS parse error returns empty list, no crash."""
+    mock_parse.side_effect = Exception("Network error")
+    init_db()
+    result = fetch_company_news("BBCA")
+    assert result == []
+
+
+@patch("app.news.time.sleep")
+@patch("app.news.feedparser.parse")
+def test_fetch_company_news_bozo_feed(mock_parse, mock_sleep):
+    """Bozo feed with no entries returns empty list."""
+    bad_feed = MagicMock()
+    bad_feed.bozo = True
+    bad_feed.entries = []
+    bad_feed.bozo_exception = "malformed XML"
+    mock_parse.return_value = bad_feed
+    init_db()
+    result = fetch_company_news("BBCA")
+    assert result == []
+
+
+@patch("app.news.requests.post")
+def test_summarize_news_ollama_error(mock_post):
+    """Ollama error returns None, no crash."""
+    mock_post.side_effect = Exception("Connection refused")
+    init_db()
+    # Use a distinct ticker to avoid hitting a cached result from earlier tests
+    articles = [{"headline": "Test", "summary": "Test", "url": "http://test-ollama-error.com", "ticker": "TLKM"}]
+    result = summarize_news("TLKM", articles, depth="FULL")
+    assert result is None
+
+
+@patch("app.news.requests.post")
+def test_summarize_news_invalid_json(mock_post):
+    """Invalid JSON from Ollama returns None."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"message": {"content": "not json at all"}}
+    mock_resp.raise_for_status = MagicMock()
+    mock_post.return_value = mock_resp
+    init_db()
+    # Use a distinct ticker to avoid hitting a cached result from earlier tests
+    articles = [{"headline": "Test", "summary": "Test", "url": "http://test-invalid-json.com", "ticker": "BBRI"}]
+    result = summarize_news("BBRI", articles, depth="FULL")
+    assert result is None
