@@ -236,7 +236,7 @@ def fetch_stock(ticker: str, avg_price: Optional[float] = None,
 # ──────────────────────────────────────────────
 # STEP 2 — BUILD PROMPT
 # ──────────────────────────────────────────────
-def build_prompt(d: dict, history: list[dict] | None = None, depth: str = "FULL") -> str:
+def build_prompt(d: dict, history: list[dict] | None = None, depth: str = "FULL", news_sentiment: dict | None = None) -> str:
     now = now_wib()  # from utils — returns WIB-aware datetime
     hour = now.hour
     minute = now.minute
@@ -291,6 +291,28 @@ INVESTOR POSITION:
             trend_lines.append(f"- {ts_str}: Rp {price:,.0f} ({day_str})")
         trend_block = "\n".join(trend_lines)
 
+    news_block = ""
+    if news_sentiment:
+        score = news_sentiment.get("score", 0)
+        if score > 0:
+            label = "Bullish"
+        elif score < 0:
+            label = "Bearish"
+        else:
+            label = "Neutral"
+        themes_str = ", ".join(news_sentiment.get("themes", []))
+        news_lines = [
+            "NEWS SENTIMENT (auto-generated):",
+            f"- Sentiment: {'+' if score > 0 else ''}{score}/5 ({label})",
+        ]
+        if themes_str:
+            news_lines.append(f"- Themes: {themes_str}")
+        if news_sentiment.get("catalyst"):
+            news_lines.append(f"- Catalyst: {news_sentiment['catalyst']}")
+        if news_sentiment.get("risk"):
+            news_lines.append(f"- Risk: {news_sentiment['risk']}")
+        news_block = "\n".join(news_lines)
+
     # ── Depth-aware variables ──
     if depth == "LIGHT":
         fundamentals_block = ""
@@ -317,6 +339,9 @@ FUNDAMENTALS:
         word_limit = 200
         extra_instructions = ""
 
+    if news_sentiment:
+        extra_instructions += "Factor news sentiment into your recommendation. If news contradicts technical/fundamental signals, flag the conflict.\n"
+
     return f"""You are an IDX stock analyst helping a retail investor decide BUY/SELL/HOLD in real-time.
 
 === MARKET SESSION: {session} ===
@@ -332,6 +357,7 @@ PRICE:
 {pnl_block}
 {fundamentals_block}
 {trend_block}
+{news_block}
 
 FORMAT INSTRUCTIONS:
 Write ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
