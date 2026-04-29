@@ -31,6 +31,7 @@ from app.db import init_db, upsert_portfolio, save_snapshot, save_analysis, get_
 from app.utils import (safe_float, fmt_idr, fmt_cap, sign, normalize_ticker,
                        WIB, now_wib, fmt_wib, get_version, get_version_url,
                        validate_portfolio_json, color_pnl)
+from app.news import fetch_company_news, get_cached_news, summarize_news, NEWS_FETCH_ENABLED
 
 load_dotenv()
 
@@ -579,11 +580,14 @@ def main():
     parser.add_argument("tickers", nargs="*", help="Ticker(s) to analyze. Omit for full portfolio.")
     parser.add_argument("--no-telegram", action="store_true", help="Print output instead of sending to Telegram")
     parser.add_argument("--no-llm",      action="store_true", help="Skip Ollama, just print raw data")
+    parser.add_argument("--no-news",     action="store_true", help="Skip news fetch for analysis")
     args = parser.parse_args()
 
     global SEND_TELEGRAM
     if args.no_telegram:
         SEND_TELEGRAM = False
+
+    skip_news = args.no_news or not NEWS_FETCH_ENABLED
 
     # Init DB and sync portfolio
     portfolio = load_portfolio()
@@ -659,8 +663,17 @@ def main():
         # Fetch trend data for LLM context
         history = get_snapshots(ticker, limit=5)
 
+        news_sentiment = None
+        if not skip_news and not args.no_llm:
+            cached_news = get_cached_news(ticker)
+            if not cached_news:
+                fetch_company_news(ticker)
+                cached_news = get_cached_news(ticker)
+            if cached_news:
+                news_sentiment = summarize_news(ticker, cached_news)
+
         # Build prompt → call Ollama → clean
-        prompt  = build_prompt(data, history=history)
+        prompt  = build_prompt(data, history=history, news_sentiment=news_sentiment)
         raw_llm = call_ollama(prompt)
         clean   = clean_for_telegram(raw_llm)
         rec     = extract_recommendation(clean)
