@@ -1,6 +1,7 @@
 """Long-running entry point for LangGraph orchestrator."""
 
 import logging
+import os
 import signal
 import time
 
@@ -29,6 +30,18 @@ def main():
 
     log.info("IDX Graph Orchestrator starting")
     init_db()
+
+    db_url = os.getenv("DATABASE_URL", "")
+    if not db_url.startswith("sqlite"):
+        try:
+            from alembic.config import Config
+            from alembic import command
+            alembic_cfg = Config("alembic.ini")
+            alembic_cfg.set_main_option("sqlalchemy.url", db_url)
+            command.upgrade(alembic_cfg, "head")
+            log.info("Alembic migrations applied")
+        except Exception as e:
+            log.warning(f"Alembic migration skipped: {e}")
 
     graph = build_orchestrator_graph()
     state = initial_orchestrator_state()

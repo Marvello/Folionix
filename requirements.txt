@@ -5,7 +5,8 @@ pandas>=2.0.0
 numpy>=1.26.0
 sqlalchemy>=2.0.0
 streamlit>=1.35.0
-# psycopg2-binary>=2.9.0  # uncomment for Postgres
+psycopg2-binary>=2.9.0
+alembic>=1.13.0
 langgraph>=0.4.0
 langchain-core>=0.3.0
 feedparser>=6.0.0
@@ -13,3 +14,4 @@ feedparser>=6.0.0
 # Dev dependencies
 pytest>=9.0.0
 ruff>=0.4.0
+testcontainers>=4.0.0
