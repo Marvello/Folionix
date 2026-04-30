@@ -29,13 +29,22 @@ def get_engine():
     global engine
     if engine is None:
         db_url = os.getenv("DATABASE_URL", "sqlite:///./data/app.db")
-        connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
-        engine = create_engine(db_url, connect_args=connect_args, echo=False)
-        # Enable WAL mode for SQLite — allows concurrent reads during writes
-        if db_url.startswith("sqlite") and db_url != "sqlite://":
-            with engine.connect() as conn:
-                conn.execute(text("PRAGMA journal_mode=WAL"))
-                conn.execute(text("PRAGMA busy_timeout=5000"))
+        is_sqlite = db_url.startswith("sqlite")
+
+        if is_sqlite:
+            connect_args = {"check_same_thread": False}
+            engine = create_engine(db_url, connect_args=connect_args, echo=False)
+            if db_url != "sqlite://":
+                with engine.connect() as conn:
+                    conn.execute(text("PRAGMA journal_mode=WAL"))
+                    conn.execute(text("PRAGMA busy_timeout=5000"))
+        else:
+            engine = create_engine(
+                db_url,
+                echo=False,
+                pool_size=5,
+                pool_pre_ping=True,
+            )
     return engine
 
 # ──────────────────────────────────────────────

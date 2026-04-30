@@ -91,6 +91,12 @@ def test_boolean_columns_accept_true_false():
         assert val is False or val == 0
 
 
+def test_engine_is_sqlite_in_tests():
+    """Verify test engine uses SQLite dialect."""
+    eng = get_engine()
+    assert eng.dialect.name == "sqlite"
+
+
 def test_sent_telegram_boolean():
     sid = save_snapshot({"ticker": "BBCA", "current_price": 9000})
     save_analysis(sid, "BBCA", "test-model", "raw", "clean",
