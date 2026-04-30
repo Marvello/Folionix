@@ -9,6 +9,7 @@ from app.db import (
     get_all_positions, get_all_latest_snapshots,
     get_analyses, sync_portfolio_json,
     save_snapshot, save_analysis, get_engine, metadata,
+    portfolio_positions, llm_analyses,
 )
 
 def setup_function():
@@ -70,3 +71,34 @@ def test_sync_portfolio_json():
         assert tickers == {"BBCA", "BBRI"}
     finally:
         os.unlink(path)
+
+
+def test_boolean_columns_accept_true_false():
+    """Boolean columns should accept Python True/False, not just 0/1."""
+    upsert_position("TEST", 1000.0, 10, "bool test")
+    positions = get_all_positions()
+    assert len(positions) == 1
+    assert positions[0]["active"] is True or positions[0]["active"] == 1
+
+    deactivate_position("TEST")
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            portfolio_positions.select().where(
+                portfolio_positions.c.ticker == "TEST"
+            )
+        ).fetchone()
+        val = dict(row._mapping)["active"]
+        assert val is False or val == 0
+
+
+def test_sent_telegram_boolean():
+    sid = save_snapshot({"ticker": "BBCA", "current_price": 9000})
+    save_analysis(sid, "BBCA", "test-model", "raw", "clean",
+                  recommendation="HOLD", sent=True, skipped_same=False)
+    with get_engine().connect() as conn:
+        row = conn.execute(
+            llm_analyses.select().where(llm_analyses.c.ticker == "BBCA")
+        ).fetchone()
+        mapping = dict(row._mapping)
+        assert mapping["sent_telegram"] in (True, 1)
+        assert mapping["skipped_same"] in (False, 0)

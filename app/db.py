@@ -13,7 +13,7 @@ import os
 from datetime import datetime, timezone
 from sqlalchemy import (
     create_engine, MetaData, Table, Column,
-    Integer, Float, String, DateTime, Text,
+    Integer, Float, String, DateTime, Text, Boolean,
     UniqueConstraint, ForeignKey, inspect, text
 )
 from dotenv import load_dotenv
@@ -93,8 +93,8 @@ llm_analyses = Table(
     Column("recommendation",  String(30)),  # extracted action: HOLD/BUY/AVERAGE DOWN/etc.
     Column("raw_output",      Text),        # Ollama raw response
     Column("clean_html",      Text),        # cleaned Telegram HTML
-    Column("sent_telegram",   Integer, default=0),   # 0/1 bool
-    Column("skipped_same",    Integer, default=0),   # 1 if skipped because same as previous
+    Column("sent_telegram",   Boolean, default=False),
+    Column("skipped_same",    Boolean, default=False),
 )
 
 # News cache — one row per article per fetch
@@ -133,7 +133,7 @@ portfolio_positions = Table(
     Column("ticker",    String(10), nullable=False),
     Column("avg_price", Float, nullable=False),
     Column("lots",      Integer, default=0),
-    Column("active",    Integer, default=1),   # 0/1 bool
+    Column("active",    Boolean, default=True),
     Column("notes",     Text, default=""),
     Column("updated_at",DateTime, nullable=False),
     UniqueConstraint("ticker", name="uq_portfolio_ticker"),
@@ -199,7 +199,7 @@ def upsert_portfolio(positions: list[dict]):
                     .values(
                         avg_price  = pos["avg_price"],
                         lots       = pos.get("lots", 0),
-                        active     = 1 if pos.get("active", True) else 0,
+                        active     = pos.get("active", True),
                         notes      = pos.get("notes", ""),
                         updated_at = now,
                     )
@@ -210,7 +210,7 @@ def upsert_portfolio(positions: list[dict]):
                         ticker     = pos["ticker"].upper(),
                         avg_price  = pos["avg_price"],
                         lots       = pos.get("lots", 0),
-                        active     = 1 if pos.get("active", True) else 0,
+                        active     = pos.get("active", True),
                         notes      = pos.get("notes", ""),
                         updated_at = now,
                     )
@@ -277,8 +277,8 @@ def save_analysis(snapshot_id: int, ticker: str, model: str,
                 recommendation = recommendation.upper().strip(),
                 raw_output     = raw_output,
                 clean_html     = clean_html,
-                sent_telegram  = 1 if sent else 0,
-                skipped_same   = 1 if skipped_same else 0,
+                sent_telegram  = sent,
+                skipped_same   = skipped_same,
             )
         )
         return result.inserted_primary_key[0]
@@ -325,7 +325,7 @@ def get_all_positions() -> list[dict]:
     with get_engine().connect() as conn:
         rows = conn.execute(
             portfolio_positions.select()
-            .where(portfolio_positions.c.active == 1)
+            .where(portfolio_positions.c.active.is_(True))
             .order_by(portfolio_positions.c.ticker)
         ).fetchall()
         return [dict(r._mapping) for r in rows]
@@ -344,14 +344,14 @@ def upsert_position(ticker: str, avg_price: float, lots: int, notes: str = ""):
             conn.execute(
                 portfolio_positions.update()
                 .where(portfolio_positions.c.ticker == ticker.upper())
-                .values(avg_price=avg_price, lots=lots, active=1,
+                .values(avg_price=avg_price, lots=lots, active=True,
                         notes=notes, updated_at=now)
             )
         else:
             conn.execute(
                 portfolio_positions.insert().values(
                     ticker=ticker.upper(), avg_price=avg_price,
-                    lots=lots, active=1, notes=notes, updated_at=now,
+                    lots=lots, active=True, notes=notes, updated_at=now,
                 )
             )
 
@@ -362,7 +362,7 @@ def deactivate_position(ticker: str):
         conn.execute(
             portfolio_positions.update()
             .where(portfolio_positions.c.ticker == ticker.upper())
-            .values(active=0, updated_at=datetime.now(timezone.utc))
+            .values(active=False, updated_at=datetime.now(timezone.utc))
         )
 
 
