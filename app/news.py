@@ -25,6 +25,8 @@ NEWS_FETCH_ENABLED = os.getenv("NEWS_FETCH_ENABLED", "true").lower() == "true"
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_NUM_CTX     = int(os.getenv("OLLAMA_NUM_CTX",     "16384"))
+OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "4096"))
 ARTICLE_LIMITS = {"LIGHT": 3, "FULL": 5, "DEEP": 10}
 
 GOOGLE_NEWS_BASE = "https://news.google.com/rss/search?hl=id&gl=ID&ceid=ID:id&q="
@@ -277,7 +279,7 @@ def summarize_news(ticker: str, articles: list[dict], depth: str = "FULL") -> di
             json={
                 "model": OLLAMA_MODEL,
                 "stream": False,
-                "options": {"temperature": 0.2, "num_predict": 512, "num_ctx": 4096},
+                "options": {"temperature": 0.2, "num_predict": OLLAMA_NUM_PREDICT // 8, "num_ctx": OLLAMA_NUM_CTX // 4},
                 "messages": [
                     {
                         "role": "system",

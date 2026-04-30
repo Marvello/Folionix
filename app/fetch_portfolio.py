@@ -43,6 +43,8 @@ log = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 OLLAMA_URL       = os.getenv("OLLAMA_URL",      "http://localhost:11434")
 OLLAMA_MODEL     = os.getenv("OLLAMA_MODEL",    "qwen2.5:7b")
+OLLAMA_NUM_CTX     = int(os.getenv("OLLAMA_NUM_CTX",     "16384"))
+OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "4096"))
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN",  "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 SEND_TELEGRAM    = os.getenv("SEND_TELEGRAM",   "true").lower() == "true"
@@ -406,8 +408,8 @@ def call_ollama(prompt: str) -> str:
                 "stream": False,
                 "options": {
                     "temperature": 0.3,
-                    "num_predict": 2048,
-                    "num_ctx":     8192,
+                    "num_predict": OLLAMA_NUM_PREDICT,
+                    "num_ctx":     OLLAMA_NUM_CTX,
                 },
                 "messages": [
                     {"role": "system",  "content": system_msg or "You are a helpful stock analyst."},

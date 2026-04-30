@@ -18,6 +18,8 @@ log = logging.getLogger(__name__)
 
 OLLAMA_URL   = os.getenv("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_NUM_CTX     = int(os.getenv("OLLAMA_NUM_CTX",     "16384"))
+OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "4096"))
 
 _BASE = Path(__file__).parent.parent
 WATCHLIST_FILE = str(
@@ -121,7 +123,7 @@ def _call_ollama(prompt: str) -> str:
         json={
             "model": OLLAMA_MODEL,
             "stream": False,
-            "options": {"temperature": 0.3, "num_predict": 1024},
+            "options": {"temperature": 0.3, "num_predict": OLLAMA_NUM_PREDICT // 4, "num_ctx": OLLAMA_NUM_CTX // 2},
             "messages": [
                 {"role": "system", "content": "You are an Indonesian stock market analyst."},
                 {"role": "user",   "content": prompt},
