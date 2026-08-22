@@ -1,0 +1,259 @@
+# Build + push images to Docker Hub, multi-arch (amd64 + arm64).
+# App and web are independent chains (test → build → merge), each gated on a
+# path filter so a push only rebuilds the image whose sources actually changed.
+#
+# Repo secrets (Settings → Secrets and variables → Actions):
+#   DOCKERHUB_USERNAME    — Docker Hub username (marvellooni)
+#   DOCKERHUB_TOKEN       — Docker Hub access token (read/write)
+#   TS_OAUTH_CLIENT_ID    — Tailscale OAuth client id (scoped to the ACL tag below)
+#   TS_OAUTH_SECRET       — Tailscale OAuth client secret
+#   DOCKHAND_API_KEY      — Dockhand API key (sent as X-API-Key on the deploy call)
+#   NPM_TOKEN             — Classic PAT with read:packages (GitHub Packages auth)
+# Repo variables:
+#   DOCKHAND_URL          — Dockhand base URL on the tailnet (e.g. http://dockhand:8080)
+#   DOCKHAND_STACK        — stack name to redeploy (e.g. folionix)
+# The deploy job joins the tailnet with an ephemeral node (tag:ci) to reach Dockhand.
+# NEXT_PUBLIC_* are not needed: the web image reads them at runtime.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    # Skip the whole workflow when a push touches ONLY these paths.
+    # Use [skip ci] in the commit message for a one-off manual skip.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'docker/docker-compose.yml'
+      - 'tasks/**'
+      - '.gitignore'
+      - 'LICENSE'
+
+jobs:
+  # Decide which image(s) changed. The workflow file itself rebuilds both.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.filter.outputs.app }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            app:
+              - 'app/**'
+              - 'lib/**'
+              - 'docker/Dockerfile.app'
+              - '.github/workflows/build.yml'
+            web:
+              - 'web/**'
+              - 'docker/Dockerfile.web'
+              - '.github/workflows/build.yml'
+
+  # ── App (TypeScript) chain ──
+  test-app:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+      - run: npm ci
+        working-directory: app
+      - run: npx tsc --noEmit
+        working-directory: app
+      - run: npx vitest run
+        working-directory: app
+
+  build-app:
+    needs: test-app
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build + push app image (by digest)
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.app
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
+          outputs: type=image,name=marvellooni/folionix-app,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=app-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=app-${{ matrix.arch }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: app-digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge-app:
+    needs: build-app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: app-digests-*
+          merge-multiple: true
+      - id: vars
+        run: echo "sha8=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Create multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t marvellooni/folionix-app:latest \
+            -t marvellooni/folionix-app:${{ steps.vars.outputs.sha8 }} \
+            $(printf 'marvellooni/folionix-app@sha256:%s ' $(ls /tmp/digests))
+
+  # ── Web (Next.js) chain ──
+  test-web:
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+      - run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  build-web:
+    needs: test-web
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Compute build date
+        id: bd
+        run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Build + push web image (by digest)
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.web
+          platforms: linux/${{ matrix.arch }}
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+            BUILD_DATE=${{ steps.bd.outputs.date }}
+            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
+          outputs: type=image,name=marvellooni/folionix-web,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=web-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=web-${{ matrix.arch }}
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge-web:
+    needs: build-web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digests
+          pattern: web-digests-*
+          merge-multiple: true
+      - id: vars
+        run: echo "sha8=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Create multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            -t marvellooni/folionix-web:latest \
+            -t marvellooni/folionix-web:${{ steps.vars.outputs.sha8 }} \
+            $(printf 'marvellooni/folionix-web@sha256:%s ' $(ls /tmp/digests))
+
+  # ── Deploy: redeploy the Dockhand stack once the image(s) are published ──
+  # Runs after whichever chain(s) ran, provided none failed and at least one
+  # published a fresh manifest. Joins the tailnet with an ephemeral node to
+  # reach the (private) Dockhand API, then triggers a pull + force-recreate redeploy.
+  deploy:
+    needs: [merge-app, merge-web]
+    if: >-
+      always() &&
+      needs.merge-app.result != 'failure' &&
+      needs.merge-web.result != 'failure' &&
+      (needs.merge-app.result == 'success' || needs.merge-web.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Join tailnet (ephemeral)
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+      - name: Redeploy stack via Dockhand
+        env:
+          DOCKHAND_URL: ${{ vars.DOCKHAND_URL }}
+          DOCKHAND_STACK: ${{ vars.DOCKHAND_STACK }}
+          DOCKHAND_API_KEY: ${{ secrets.DOCKHAND_API_KEY }}
+        run: |
+          curl -fsS --max-time 120 -X POST \
+            "${DOCKHAND_URL%/}/api/stacks/${DOCKHAND_STACK}/deploy" \
+            -H "Authorization: Bearer ${DOCKHAND_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"pull": true, "build": false, "forceRecreate": true}'

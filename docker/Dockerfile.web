@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1.7
+FROM node:24-slim AS builder
+WORKDIR /repo
+ARG NPM_TOKEN
+COPY .npmrc package.json package-lock.json ./
+COPY lib/ ./lib/
+COPY web/package.json ./web/
+RUN --mount=type=cache,target=/root/.npm \
+    echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc && \
+    npm ci -w web && \
+    rm -f .npmrc
+COPY web/ ./web/
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN cd web && npm run build
+
+FROM node:24-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ARG GIT_COMMIT=dev
+ARG BUILD_DATE=
+ENV NEXT_PUBLIC_GIT_SHA=$GIT_COMMIT
+ENV NEXT_PUBLIC_BUILD_DATE=$BUILD_DATE
+COPY --from=builder /repo/web/public ./web/public
+COPY --from=builder /repo/web/.next/standalone ./
+COPY --from=builder /repo/web/.next/static ./web/.next/static
+USER node
+EXPOSE 3000
+ENV PORT=3000 HOSTNAME=0.0.0.0
+CMD ["node", "web/server.js"]

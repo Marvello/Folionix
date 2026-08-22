@@ -1,0 +1,37 @@
+# Secrets
+.env
+.env.local
+
+# Data — all runtime state lives in Supabase; nothing under data/ is tracked
+data/
+*.db
+
+# Node / Next.js (web/)
+node_modules/
+.next/
+
+# Build output
+dist/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+.worktrees/
+
+# Local skill tooling (not project code)
+.agents/
+.claude/
+skills-lock.json
+
+# Superpowers skill tooling scratch
+.superpowers/
+
+# Local one-time data imports (personal data, never commit)
+supabase/imports/
+coverage/
+
+# generated knowledge-graph artifact (regenerate with `graphify update .`)
+graphify-out/

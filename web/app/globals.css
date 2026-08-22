@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  /* ── Surfaces (brand: "Mission control at midnight") ── */
+  --color-page: #0b1120;       /* Void Navy — app background */
+  --color-component: #16202f;  /* Panel Slate — cards, panels */
+  --color-edge: #1e293b;       /* card borders */
+
+  /* ── Text ── */
+  --color-tprimary: #e2e8f0;   /* Paper White */
+  --color-tsecondary: #cbd5e1;
+  --color-tmuted: #94a3b8;     /* Neutral Grey */
+  --color-tdim: #64748b;
+  --color-heading: #cbd5e1;
+
+  /* ── Brand + product ── */
+  --color-accent: #2dd4bf;     /* Folio Teal — the product */
+  --color-btn: #2dd4bf;        /* primary buttons = teal */
+  --color-ai: #8b5cf6;         /* Signal Violet — model-generated insights */
+  --color-ai-bright: #a78bfa;  /* Signal Bright — insight-badge text */
+  --color-ai-surface: #23243f; /* insight-badge background */
+
+  /* ── Financial semantics ── */
+  --color-up: #34d399;         /* Gain Green — profit */
+  --color-down: #f59e0b;       /* Loss Amber — loss (calm, not panic) */
+  --color-warn: #94a3b8;       /* secondary labels (neutral) */
+  --color-critical: #ef4444;   /* Critical Red — system errors only */
+
+  /* ── Typography ── */
+  --font-display: var(--font-space-grotesk), Inter, sans-serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), "IBM Plex Mono", ui-monospace, monospace;
+}
+
+body {
+  background: var(--color-page);
+  color: var(--color-tsecondary);
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+}
+
+/* Brand: all financial figures render in mono, tabular-aligned, and never
+   wrap — a currency code and its amount (`IDR 442.663`) stay on one line so
+   table rows keep a single-line height. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Brand: the only thing that "lights up" is Folio Teal on focus.
+   One rule covers every form control so focus is always visible (a11y). */
+input,
+select,
+textarea {
+  outline: none;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-accent);
+}
+
+/* Modal motion. Brand: feedback 120ms / content 220ms, easing (0.2,0,0,1).
+   The scrim is a solid dark wash, never a blur (no glassmorphism). */
+@keyframes folionix-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes folionix-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+.modal-scrim {
+  animation: folionix-fade-in 120ms cubic-bezier(0.2, 0, 0, 1);
+}
+.modal-panel {
+  animation: folionix-pop-in 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-scrim,
+  .modal-panel {
+    animation: none;
+  }
+}

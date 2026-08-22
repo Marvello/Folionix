@@ -1,0 +1,56 @@
+{
+  "name": "folionix-app",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "bot": "tsx src/bot/bot.ts",
+    "graph": "tsx src/graph/runner.ts",
+    "worker": "tsx src/graph/worker.ts",
+    "prices": "tsx src/services/portfolio.ts --prices",
+    "portfolio": "tsx src/services/portfolio.ts --full",
+    "watchlist": "tsx src/services/portfolio.ts --watchlist",
+    "weekreview": "tsx src/services/weekReview.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "node build.mjs",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^4",
+    "@folionix/lib": "*",
+    "@langchain/core": "^1",
+    "@langchain/langgraph": "^1",
+    "@marvello/common-tech": "^1.0.0",
+    "ai": "^7",
+    "dotenv": "^17",
+    "got-scraping": "^4.2.1",
+    "grammy": "^1",
+    "jose": "^5",
+    "marked": "^18.0.6",
+    "nodemailer": "^9.0.3",
+    "pg": "^8.23.0",
+    "rss-parser": "^3",
+    "tough-cookie": "^5.1.2",
+    "yahoo-finance2": "^3.15.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.0.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.28",
+    "eslint": "^10.8.1",
+    "globals": "^17.11.0",
+    "tsx": "^4",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.67.0",
+    "vitest": "^4"
+  },
+  "overrides": {
+    "adm-zip": "^0.6.0",
+    "fast-uri": "^3.1.4",
+    "@hono/node-server": "^2.0.5"
+  }
+}

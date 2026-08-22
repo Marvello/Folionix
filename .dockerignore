@@ -1,0 +1,10 @@
+**/__pycache__/
+**/*.pyc
+**/.next
+**/node_modules
+.env
+data/
+*.db
+.DS_Store
+**/venv/
+.git
