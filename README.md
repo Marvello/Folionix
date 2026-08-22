@@ -219,4 +219,4 @@ The LangGraph orchestrator (`folionix-graph`) replaces cron with adaptive, signa
 
 ## License
 
-This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): free to use, modify, and share for any **noncommercial** purpose. **Commercial use requires a separate paid license** — contact marvello.oni@gmail.com.
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE): free to use, modify, and share for any **noncommercial** purpose. **Commercial use requires a separate paid license** — contact me@marvello.xyz.
