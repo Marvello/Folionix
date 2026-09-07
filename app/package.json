@@ -9,6 +9,7 @@
     "prices": "tsx src/services/portfolio.ts --prices",
     "portfolio": "tsx src/services/portfolio.ts --full",
     "watchlist": "tsx src/services/portfolio.ts --watchlist",
+    "fundamentals": "tsx src/services/fundamentals.ts",
     "weekreview": "tsx src/services/weekReview.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
