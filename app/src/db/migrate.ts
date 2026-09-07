@@ -15,6 +15,21 @@ import { getPool } from './db.js'
 // snapshot of 001–036 and registers all of them; this runner only ever takes
 // it from there.
 
+/**
+ * Highest migration folded into db/schema.sql. Everything at or below this is
+ * in the database by definition once schema.sql has been applied, so the runner
+ * never executes those files — it only backfills their ledger rows.
+ *
+ * This is not a belt-and-braces check, it is load-bearing: schema.sql shipped
+ * for a long time registering only '034' and '036', so a database bootstrapped
+ * from it has a ledger full of holes. Trusting the ledger alone made the runner
+ * replay from 001 and abort at 003 with `role "authenticated" does not exist` —
+ * migrations 003-033 predate 035_drop_rls and are not runnable on plain Postgres.
+ *
+ * Bump this when schema.sql is re-snapshotted to fold in newer migrations.
+ */
+export const SCHEMA_BASELINE = '036'
+
 /** Advisory-lock key, arbitrary but stable — serializes concurrent starts. */
 const LOCK_KEY = 43_370_037
 
@@ -38,14 +53,25 @@ export function findMigrationsDir(): string {
   throw new Error('db/migrations not found — set MIGRATIONS_DIR')
 }
 
-/** Migration files not yet in the ledger, in numeric order. */
+/** Migration files above the schema.sql baseline that are not yet in the ledger. */
 export function pendingFiles(files: string[], applied: Set<string>): string[] {
-  return files.filter(f => FILE_RE.test(f) && !applied.has(f.slice(0, 3))).sort()
+  return files
+    .filter(f => FILE_RE.test(f) && f.slice(0, 3) > SCHEMA_BASELINE && !applied.has(f.slice(0, 3)))
+    .sort()
+}
+
+/** Files at or below the baseline missing from the ledger — recorded, never executed. */
+export function baselineGaps(files: string[], applied: Set<string>): string[] {
+  return files
+    .filter(f => FILE_RE.test(f) && f.slice(0, 3) <= SCHEMA_BASELINE && !applied.has(f.slice(0, 3)))
+    .sort()
 }
 
 export interface MigrationStatus {
   pending: string[]
   applied: string[]
+  /** At/below baseline but unrecorded — a ledger hole, not work to do. */
+  baselineGaps: string[]
 }
 
 /** Read-only check: which migration files are not yet in the ledger. */
@@ -64,6 +90,7 @@ export async function checkMigrations(): Promise<MigrationStatus> {
   return {
     applied: files.filter(f => FILE_RE.test(f) && done.has(f.slice(0, 3))).sort(),
     pending: pendingFiles(files, done),
+    baselineGaps: baselineGaps(files, done),
   }
 }
 
@@ -85,7 +112,21 @@ export async function runPendingMigrations(): Promise<string[]> {
 
     const { rows } = await client.query('select version from public.schema_migrations')
     const done = new Set<string>(rows.map((r: { version: string }) => r.version))
-    const pending = pendingFiles(readdirSync(dir), done)
+    const files = readdirSync(dir)
+
+    // Close ledger holes left by older schema.sql snapshots. Recorded only —
+    // these files are already contained in schema.sql and must never execute.
+    const gaps = baselineGaps(files, done)
+    if (gaps.length > 0) {
+      await client.query(
+        `insert into public.schema_migrations (version, name)
+         select * from unnest($1::varchar[], $2::text[])
+         on conflict (version) do nothing`,
+        [gaps.map(f => f.slice(0, 3)), gaps.map(f => f.replace(/\.sql$/, ''))])
+      console.log(`[migrate] recorded ${gaps.length} pre-baseline migration(s) already in schema.sql`)
+    }
+
+    const pending = pendingFiles(files, done)
 
     for (const file of pending) {
       const version = file.slice(0, 3)
