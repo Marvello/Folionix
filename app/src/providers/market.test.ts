@@ -198,7 +198,7 @@ describe('mapKeyStats', () => {
         totalCash: 3.1e14, totalDebt: 9.6e13,
         freeCashflow: 1.24e13, operatingCashflow: 1.9e13,
       },
-    })
+    }, new Map())
     expect(out.forward_pe).toBe(19.8)
     expect(out.recommendation_key).toBe('strong_buy')
     expect(out.analyst_count).toBe(25)
@@ -212,7 +212,7 @@ describe('mapKeyStats', () => {
     const out = mapKeyStats({
       defaultKeyStatistics: { priceToBook: 2.7, bookValue: 1800 },
       financialData: {},
-    })
+    }, new Map())
     expect(out.price_to_book).toBe(2.7)
     expect(out.target_mean).toBeNull()
     expect(out.analyst_count).toBeNull()
@@ -222,9 +222,49 @@ describe('mapKeyStats', () => {
 
   it('treats an entirely absent module as all nulls', async () => {
     const { mapKeyStats } = await import('./market.js')
-    const out = mapKeyStats({})
+    const out = mapKeyStats({}, new Map())
     expect(out.target_mean).toBeNull()
     expect(out.price_to_book).toBeNull()
+  })
+
+  it('corrects price_to_book and book_value for a USD-reporting issuer (BSSR shape)', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102 },
+      financialData: { financialCurrency: 'USD' },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: 4950 },
+    }, new Map([['USD', 16200]]))
+    expect(out.price_to_book).toBeCloseTo(3.0, 1)
+    expect(out.book_value).toBeCloseTo(1652.4, 0)
+  })
+
+  it('nulls price_to_book, book_value, trailing_eps and forward_eps when no fx rate is available', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102, trailingEps: 0.01, forwardEps: 0.012 },
+      financialData: { financialCurrency: 'USD' },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: 4950 },
+    }, new Map())
+    expect(out.price_to_book).toBeNull()
+    expect(out.book_value).toBeNull()
+    expect(out.trailing_eps).toBeNull()
+    expect(out.forward_eps).toBeNull()
+  })
+
+  it('passes price_to_book, book_value, trailing_eps and forward_eps through unchanged when currencies agree (BBCA shape)', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 2.998, bookValue: 1000, trailingEps: 300, forwardEps: 320 },
+      financialData: { financialCurrency: 'IDR' },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: 8500 },
+    }, new Map([['USD', 16200]]))
+    expect(out.price_to_book).toBe(2.998)
+    expect(out.book_value).toBe(1000)
+    expect(out.trailing_eps).toBe(300)
+    expect(out.forward_eps).toBe(320)
   })
 })
 

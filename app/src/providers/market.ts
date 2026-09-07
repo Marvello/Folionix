@@ -279,20 +279,53 @@ function s(v: unknown): string | null {
 type RawSummary = {
   defaultKeyStatistics?: Record<string, unknown>
   financialData?: Record<string, unknown>
+  summaryDetail?: Record<string, unknown>
+  price?: Record<string, unknown>
+}
+
+/**
+ * Same USD-financial-reporting problem as correctPriceToBook, but for a raw
+ * per-share amount (book value, EPS) instead of a ratio: convert it into the
+ * quote currency using the same fx map, or null when we cannot.
+ */
+function correctPerShare(
+  value: number | null,
+  financialCurrency: string | null,
+  quoteCurrency: string | null,
+  fxToIdr: Map<string, number>,
+): number | null {
+  if (value == null) return null
+  if (!financialCurrency || !quoteCurrency || financialCurrency === quoteCurrency) return value
+  if (quoteCurrency !== 'IDR') return null  // only IDR rates are maintained
+  const rate = fxToIdr.get(financialCurrency)
+  return rate ? value * rate : null
 }
 
 /** Pure mapping from a quoteSummary payload to KeyStats. Exported for tests. */
-export function mapKeyStats(raw: RawSummary): KeyStats {
+export function mapKeyStats(raw: RawSummary, fxToIdr: Map<string, number>): KeyStats {
   const k = raw.defaultKeyStatistics ?? {}
   const f = raw.financialData ?? {}
+  const sd = raw.summaryDetail ?? {}
+  const p = raw.price ?? {}
+  const financialCurrency = s(f.financialCurrency)
+  const quoteCurrency = s(sd.currency)
+  const price = n(p.regularMarketPrice)
+  const rawBookValue = n(k.bookValue)
   return {
     forward_pe: n(k.forwardPE),
     peg_ratio: n(k.pegRatio),
-    price_to_book: n(k.priceToBook),
+    price_to_book: correctPriceToBook({
+      reportedPb: n(k.priceToBook),
+      price,
+      bookValue: rawBookValue,
+      quoteCurrency,
+      financialCurrency,
+      fxToIdr,
+    }),
     enterprise_value: n(k.enterpriseValue),
-    book_value: n(k.bookValue),
-    trailing_eps: n(k.trailingEps),
-    forward_eps: n(k.forwardEps),
+    book_value: correctPerShare(rawBookValue, financialCurrency, quoteCurrency, fxToIdr),
+    trailing_eps: correctPerShare(n(k.trailingEps), financialCurrency, quoteCurrency, fxToIdr),
+    forward_eps: correctPerShare(n(k.forwardEps), financialCurrency, quoteCurrency, fxToIdr),
     profit_margins: n(k.profitMargins),
     ebitda_margins: n(f.ebitdaMargins),
     return_on_equity: n(f.returnOnEquity),
@@ -329,9 +362,10 @@ export async function fetchKeyStats(ticker: string): Promise<KeyStats | null> {
   const symbol = normalizeTicker(ticker)
   try {
     const raw = await withRetry(() =>
-      yf.quoteSummary(symbol, { modules: ['defaultKeyStatistics', 'financialData'] },
-                      { validateResult: false }))
-    return mapKeyStats(raw as RawSummary)
+      yf.quoteSummary(symbol,
+        { modules: ['defaultKeyStatistics', 'financialData', 'summaryDetail', 'price'] },
+        { validateResult: false }))
+    return mapKeyStats(raw as RawSummary, await fxRatesToIdr())
   } catch (err) {
     console.error(`[market] keyStats ${symbol}:`, err instanceof Error ? err.message : err)
     return null
