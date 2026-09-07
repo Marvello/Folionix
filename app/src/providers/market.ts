@@ -311,6 +311,15 @@ export function mapKeyStats(raw: RawSummary, fxToIdr: Map<string, number>): KeyS
   const quoteCurrency = s(sd.currency)
   const price = n(p.regularMarketPrice)
   const rawBookValue = n(k.bookValue)
+  // Currency map for the fields below, because getting this wrong is silent:
+  //  - quote currency (IDR for .JK), store raw: price_to_book's price input,
+  //    trailing_eps, forward_eps, target_mean/high/low.
+  //  - financial currency (USD for the coal names), convert via correctPerShare:
+  //    book_value, enterprise_value, total_cash, total_debt, free_cashflow,
+  //    operating_cashflow.
+  //  - dimensionless (margins, ratios, growth, percentages, share counts): raw.
+  // A new absolute-money field defaults to WRONG unless it is converted.
+  const money = (v: number | null) => correctPerShare(v, financialCurrency, quoteCurrency, fxToIdr)
   return {
     forward_pe: n(k.forwardPE),
     peg_ratio: n(k.pegRatio),
@@ -322,8 +331,8 @@ export function mapKeyStats(raw: RawSummary, fxToIdr: Map<string, number>): KeyS
       financialCurrency,
       fxToIdr,
     }),
-    enterprise_value: n(k.enterpriseValue),
-    book_value: correctPerShare(rawBookValue, financialCurrency, quoteCurrency, fxToIdr),
+    enterprise_value: money(n(k.enterpriseValue)),
+    book_value: money(rawBookValue),
     // Unlike bookValue, yahoo's trailingEps/forwardEps are already expressed
     // in the quote currency (verified: price / trailingEps reproduces yahoo's
     // own trailingPE for USD-reporting issuers too) - do not convert these.
@@ -336,10 +345,10 @@ export function mapKeyStats(raw: RawSummary, fxToIdr: Map<string, number>): KeyS
     earnings_growth: n(f.earningsGrowth),
     current_ratio: n(f.currentRatio),
     quick_ratio: n(f.quickRatio),
-    total_cash: n(f.totalCash),
-    total_debt: n(f.totalDebt),
-    free_cashflow: n(f.freeCashflow),
-    operating_cashflow: n(f.operatingCashflow),
+    total_cash: money(n(f.totalCash)),
+    total_debt: money(n(f.totalDebt)),
+    free_cashflow: money(n(f.freeCashflow)),
+    operating_cashflow: money(n(f.operatingCashflow)),
     target_mean: n(f.targetMeanPrice),
     target_high: n(f.targetHighPrice),
     target_low: n(f.targetLowPrice),
@@ -444,13 +453,19 @@ export async function fetchFinancials(ticker: string): Promise<FinancialPeriod[]
   try {
     const raw = await withRetry(() =>
       yf.quoteSummary(symbol,
-        { modules: ['incomeStatementHistoryQuarterly', 'summaryDetail'] },
+        { modules: ['incomeStatementHistoryQuarterly', 'summaryDetail', 'financialData'] },
         { validateResult: false })) as {
           incomeStatementHistoryQuarterly?: { incomeStatementHistory?: Record<string, unknown>[] }
           summaryDetail?: { currency?: string }
+          financialData?: { financialCurrency?: string }
         }
     const rows = raw.incomeStatementHistoryQuarterly?.incomeStatementHistory ?? []
-    const currency = s(raw.summaryDetail?.currency)?.toUpperCase() ?? null
+    // The income statement is reported in the issuer's FINANCIAL currency, which
+    // is USD for the IDX coal names (ADRO, PTBA, ITMG, AADI, MDKA) even though
+    // summaryDetail.currency is always IDR for a .JK listing. Stamping the quote
+    // currency here made the "not converted" disclaimer unreachable.
+    const currency = s(raw.financialData?.financialCurrency)?.toUpperCase()
+      ?? s(raw.summaryDetail?.currency)?.toUpperCase() ?? null
     return rows
       .map((r) => mapFinancialPeriod(r, currency))
       .filter((p) => p.period_end !== '1970-01-01')

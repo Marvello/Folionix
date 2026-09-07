@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const { quoteMock, chartMock, getLatestSnapshotMock, fetchFinnhubQuoteMock, getForexRatesToIdrMock } = vi.hoisted(() => ({
+const { quoteMock, chartMock, quoteSummaryMock, getLatestSnapshotMock, fetchFinnhubQuoteMock, getForexRatesToIdrMock } = vi.hoisted(() => ({
   quoteMock: vi.fn(),
   chartMock: vi.fn(),
+  quoteSummaryMock: vi.fn(),
   getLatestSnapshotMock: vi.fn(),
   fetchFinnhubQuoteMock: vi.fn(),
   getForexRatesToIdrMock: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock('yahoo-finance2', () => ({
   default: class {
     quote = quoteMock
     chart = chartMock
+    quoteSummary = quoteSummaryMock
   },
 }))
 
@@ -230,13 +232,27 @@ describe('mapKeyStats', () => {
   it('corrects price_to_book and book_value for a USD-reporting issuer (BSSR shape), leaves trailing_eps alone', async () => {
     const { mapKeyStats } = await import('./market.js')
     const out = mapKeyStats({
-      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102, trailingEps: 659.63 },
-      financialData: { financialCurrency: 'USD' },
+      defaultKeyStatistics: {
+        priceToBook: 48529.414, bookValue: 0.102, trailingEps: 659.63,
+        enterpriseValue: 74_000_000,
+      },
+      financialData: {
+        financialCurrency: 'USD',
+        totalCash: 120_000_000, totalDebt: 5_000_000,
+        freeCashflow: 40_000_000, operatingCashflow: 55_000_000,
+      },
       summaryDetail: { currency: 'IDR' },
       price: { regularMarketPrice: 4950 },
     }, new Map([['USD', 16200]]))
     expect(out.price_to_book).toBeCloseTo(3.0, 1)
     expect(out.book_value).toBeCloseTo(1652.4, 0)
+    // Absolute money from the financial statements: converted into IDR, or the
+    // card renders "IDR 1,20B" for a company holding ~IDR 1,944T of cash.
+    expect(out.total_cash).toBe(120_000_000 * 16200)
+    expect(out.total_debt).toBe(5_000_000 * 16200)
+    expect(out.enterprise_value).toBe(74_000_000 * 16200)
+    expect(out.free_cashflow).toBe(40_000_000 * 16200)
+    expect(out.operating_cashflow).toBe(55_000_000 * 16200)
     // trailingEps is already in the quote currency, unlike bookValue - must not be converted.
     expect(out.trailing_eps).toBe(659.63)
   })
@@ -274,15 +290,53 @@ describe('mapKeyStats', () => {
   it('passes price_to_book, book_value, trailing_eps and forward_eps through unchanged when currencies agree (BBCA shape)', async () => {
     const { mapKeyStats } = await import('./market.js')
     const out = mapKeyStats({
-      defaultKeyStatistics: { priceToBook: 2.998, bookValue: 1000, trailingEps: 300, forwardEps: 320 },
-      financialData: { financialCurrency: 'IDR' },
+      defaultKeyStatistics: { priceToBook: 2.998, bookValue: 1000, trailingEps: 300, forwardEps: 320, enterpriseValue: 8.2e14 },
+      financialData: { financialCurrency: 'IDR', totalCash: 3.1e14, totalDebt: 9.6e13, freeCashflow: 1.24e13, operatingCashflow: 1.9e13 },
       summaryDetail: { currency: 'IDR' },
       price: { regularMarketPrice: 8500 },
     }, new Map([['USD', 16200]]))
     expect(out.price_to_book).toBe(2.998)
+    // An IDR reporter must pass straight through, unscaled.
+    expect(out.total_cash).toBe(3.1e14)
+    expect(out.total_debt).toBe(9.6e13)
+    expect(out.enterprise_value).toBe(8.2e14)
+    expect(out.free_cashflow).toBe(1.24e13)
+    expect(out.operating_cashflow).toBe(1.9e13)
     expect(out.book_value).toBe(1000)
     expect(out.trailing_eps).toBe(300)
     expect(out.forward_eps).toBe(320)
+  })
+})
+
+describe('fetchFinancials — reporting currency', () => {
+  it('stamps the issuer financial currency, not the IDR quote currency', async () => {
+    // ADRO shape: quoted in IDR on IDX, reports its income statement in USD.
+    quoteSummaryMock.mockResolvedValue({
+      incomeStatementHistoryQuarterly: {
+        incomeStatementHistory: [
+          { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 1_500_000_000, netIncome: 300_000_000 },
+        ],
+      },
+      summaryDetail: { currency: 'IDR' },
+      financialData: { financialCurrency: 'USD' },
+    })
+    const { fetchFinancials } = await import('./market.js')
+    const out = await fetchFinancials('ADRO')
+    expect(out[0]?.currency).toBe('USD')
+  })
+
+  it('falls back to the quote currency when yahoo reports no financialCurrency', async () => {
+    quoteSummaryMock.mockResolvedValue({
+      incomeStatementHistoryQuarterly: {
+        incomeStatementHistory: [
+          { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 28_157_061_000_000 },
+        ],
+      },
+      summaryDetail: { currency: 'IDR' },
+    })
+    const { fetchFinancials } = await import('./market.js')
+    const out = await fetchFinancials('BBCA')
+    expect(out[0]?.currency).toBe('IDR')
   })
 })
 
