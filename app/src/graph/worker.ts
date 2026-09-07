@@ -7,6 +7,7 @@ import {
   claimAnalysisJob, completeJob, failJob, requeueStaleJobs,
 } from '../db/db'
 import type { AnalysisJobRow } from '../../../lib/types'
+import { runPendingMigrations } from '../db/migrate'
 
 const POLL_MS      = Number(process.env.WORKER_POLL_SEC ?? 10) * 1000
 const MAX_ATTEMPTS = Number(process.env.WORKER_MAX_ATTEMPTS ?? 3)
@@ -40,6 +41,7 @@ process.on('SIGTERM', () => {
 })
 
 async function main(): Promise<void> {
+  await runPendingMigrations()
   console.log('[worker] starting analysis-job worker')
 
   const sweepStale = async (): Promise<void> => {

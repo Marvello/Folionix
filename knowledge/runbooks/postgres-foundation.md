@@ -53,16 +53,36 @@ PostgREST, no backend API between the web app and the database.
 
 ## Applying a migration
 
+Normally you do not. `app/src/db/migrate.ts` applies pending migrations at
+startup — `folionix-bot`, `folionix-graph` and `folionix-worker` each call
+`runPendingMigrations()` before doing any work, so a `docker compose up -d`
+after a deploy brings the schema forward on its own. It diffs
+`db/migrations/NNN_*.sql` against `schema_migrations`, applies what is missing
+in numeric order, each file in its own transaction, under a `pg_advisory_lock`
+so the three services starting together cannot race.
+
+A failing migration rolls back and the process exits non-zero. Under
+`restart: unless-stopped` that becomes a crash loop — which is the intended
+signal: the service will not run against a half-migrated schema. Check
+`docker compose logs folionix-graph` for the `[migrate] migration NNN failed:`
+line.
+
+By hand:
+
 ```bash
-psql "$DATABASE_URL" -f db/migrations/NNN_name.sql
+cd app
+npm run migrate              # apply pending
+npm run migrate -- --check   # report pending, exit 1, apply nothing
 ```
 
-Wrap anything you are unsure about in an explicit transaction so a parse error
-rolls back cleanly:
+Or straight through psql, transaction-wrapped so a parse error rolls back:
 
 ```bash
 psql "$DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f db/migrations/NNN_name.sql
 ```
+
+The runner **refuses to bootstrap**: an absent or empty `schema_migrations` is
+a hard error, not an invitation to replay from `001`. See the warning above.
 
 ## Migration ledger
 

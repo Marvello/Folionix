@@ -7,6 +7,7 @@ await build({
     'src/graph/worker.ts',
     'src/services/portfolio.ts',
     'src/services/weekReview.ts',
+    'src/db/migrate.ts',
   ],
   bundle: true,
   platform: 'node',

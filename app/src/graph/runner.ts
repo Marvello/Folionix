@@ -11,6 +11,7 @@ import { refreshGoldPrices } from '../services/gold'
 import { refreshFundNavs, refreshFundHoldings } from '../services/funds'
 import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
+import { runPendingMigrations } from '../db/migrate'
 
 const ACTIVE_INTERVAL_MS  = Number(process.env.GRAPH_ACTIVE_INTERVAL ?? 5) * 60_000
 const IDLE_INTERVAL_MS    = Number(process.env.GRAPH_IDLE_INTERVAL ?? 30) * 60_000
@@ -92,6 +93,7 @@ async function runGoldRefresh(reason: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await runPendingMigrations()
   console.log('[runner] starting LangGraph orchestrator')
   const graph = buildOrchestratorGraph()
 

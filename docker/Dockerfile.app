@@ -28,4 +28,7 @@ RUN addgroup -S appuser && adduser -S appuser -G appuser
 COPY --from=builder /repo/app/dist ./dist
 COPY --from=deps /repo/node_modules ./node_modules
 COPY --from=builder /repo/lib ./lib
+# Migration SQL is read at runtime by src/db/migrate.ts (found by walking up
+# from the workdir for db/migrations), so it must ship inside the image.
+COPY db/ ./db/
 USER appuser

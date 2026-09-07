@@ -12,6 +12,7 @@ import { runPortfolioPipeline, runPriceRefresh } from '../services/portfolio'
 import { runWeekReview } from '../services/weekReview'
 import { fetchGoldPrices } from '../providers/cermati'
 import { displayTicker, fmtIdr, fmtCap, normalizeTicker } from '../../../lib/format'
+import { runPendingMigrations } from '../db/migrate'
 
 const TICKER_RE = /^[A-Z0-9]{1,10}$/
 
@@ -36,7 +37,7 @@ export function validateGrams(n: number): void {
   if (n > 100_000) throw new Error('GRAMS too large (max 100,000)')
 }
 
-export function startBot(): void {
+export async function startBot(): Promise<void> {
   const token = process.env.TELEGRAM_TOKEN
   if (!token) throw new Error('TELEGRAM_TOKEN not set')
 
@@ -331,10 +332,14 @@ bot.command('weekreview', guard(async (ctx) => {
   )
 }))
 
+  await runPendingMigrations()
   console.log('[bot] starting long-polling...')
   bot.start()
 }
 
 if (process.argv[1]?.endsWith('bot.ts') || process.argv[1]?.endsWith('bot.js')) {
-  startBot()
+  startBot().catch((err: unknown) => {
+    console.error('[bot] failed to start:', err instanceof Error ? err.message : err)
+    process.exit(1)
+  })
 }

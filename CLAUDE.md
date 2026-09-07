@@ -13,11 +13,12 @@ Indonesian stock portfolio (IDX) analyzer. Fetches market data via yahoo-finance
 
 ```
 app/                        # Node 24 TypeScript backend (ESM, esbuild)
-├── package.json            # deps + scripts: bot/graph/prices/portfolio/watchlist/test/typecheck/build
+├── package.json            # deps + scripts: bot/graph/worker/prices/portfolio/watchlist/weekreview/migrate/test/typecheck/build
 ├── tsconfig.json           # NodeNext, strict, noEmit, includes ../lib/**/*
 ├── build.mjs               # esbuild bundle (bot, graph/runner, services/portfolio)
 └── src/
     ├── db/db.ts            # Postgres data layer (node-postgres pool over DATABASE_URL)
+    ├── db/migrate.ts       # startup migration runner (advisory-locked, refuses to bootstrap)
     ├── providers/
     │   ├── market.ts       # yahoo-finance2 stock fetch (price, fundamentals, P&L)
     │   ├── finnhub.ts      # Finnhub REST fallback provider
@@ -108,6 +109,10 @@ npm run worker -- --enqueue BBCA
 # Next.js dashboard
 cd web && npm install && npm run dev    # http://localhost:3000
 
+# Apply pending migrations by hand (also runs automatically at service startup)
+npm run migrate
+npm run migrate -- --check   # report pending, exit 1, apply nothing
+
 # Tests + typecheck
 cd app && npm test
 cd app && npm run typecheck
@@ -180,7 +185,7 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 - P&L status emoji: 🟢 PROFIT, ⚪ BREAKEVEN, 🟡 SMALL LOSS, 🔴 LOSS
 - All persistent data lives in Postgres (no local JSON/SQLite source of truth)
 - Web CRUD (every add/edit) opens a centered modal dialog via `web/components/Modal.tsx`, never an inline form between rows (see `knowledge/design.md` → Components → Dialogs)
-- Migrations are tracked in `public.schema_migrations` (version, name, applied_at). Every new file in `db/migrations/` **must end** with `insert into public.schema_migrations (version, name) values ('NNN', 'NNN_name') on conflict do nothing;` so `select version from public.schema_migrations order by version` reflects what's live. Migrations are applied manually (`psql "$DATABASE_URL" -f ...`), in numeric order; there is no runner. `db/schema.sql` is the consolidated snapshot of `001`–`036` and registers all of them, so a fresh bootstrap applies `schema.sql` then `037`+ only — **never replay `003`–`033`**, which predate `035_drop_rls` and still use Supabase-only `to authenticated` / `auth.role()` / `revoke ... from anon` that abort on plain Postgres.
+- Migrations are tracked in `public.schema_migrations` (version, name, applied_at). Every new file in `db/migrations/` **must end** with `insert into public.schema_migrations (version, name) values ('NNN', 'NNN_name') on conflict do nothing;` so `select version from public.schema_migrations order by version` reflects what's live. Pending migrations are applied automatically at startup by `app/src/db/migrate.ts` — `runPendingMigrations()` runs before `bot.ts`, `runner.ts` and `worker.ts` begin work, diffing `db/migrations/NNN_*.sql` against `schema_migrations` and applying what's missing in numeric order, each in its own transaction, under a `pg_advisory_lock` so the three services can start together. A failing migration rolls back and the process exits non-zero. Run it by hand with `npm run migrate` (or `npm run migrate -- --check`, which reports pending and exits 1 without applying). The runner **never bootstraps**: an absent `schema_migrations` is a hard error, because `db/schema.sql` is the consolidated snapshot of `001`–`036` and registers all of them — a fresh database gets `schema.sql` first, then `037`+. **Never replay `003`–`033`**: they predate `035_drop_rls` and still use Supabase-only `to authenticated` / `auth.role()` / `revoke ... from anon` that abort on plain Postgres.
 
 ## Security
 

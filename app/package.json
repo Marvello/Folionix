@@ -14,7 +14,8 @@
     "typecheck": "tsc --noEmit",
     "build": "node build.mjs",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4",
