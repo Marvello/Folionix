@@ -234,3 +234,106 @@ export async function fetchDividendAmount(ticker: string): Promise<number | null
   const rate = quote.trailingAnnualDividendRate
   return typeof rate === 'number' && rate > 0 ? rate : null
 }
+
+// ── FUNDAMENTALS ──
+
+export interface KeyStats {
+  forward_pe: number | null
+  peg_ratio: number | null
+  price_to_book: number | null
+  enterprise_value: number | null
+  book_value: number | null
+  trailing_eps: number | null
+  forward_eps: number | null
+  profit_margins: number | null
+  ebitda_margins: number | null
+  return_on_equity: number | null
+  revenue_growth: number | null
+  earnings_growth: number | null
+  current_ratio: number | null
+  quick_ratio: number | null
+  total_cash: number | null
+  total_debt: number | null
+  free_cashflow: number | null
+  operating_cashflow: number | null
+  target_mean: number | null
+  target_high: number | null
+  target_low: number | null
+  recommendation_key: string | null
+  analyst_count: number | null
+  shares_outstanding: number | null
+  float_shares: number | null
+  held_pct_insiders: number | null
+  held_pct_institutions: number | null
+  change_52w: number | null
+}
+
+/** Yahoo returns undefined for absent fields; the DB wants null. */
+function n(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+function s(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null
+}
+
+type RawSummary = {
+  defaultKeyStatistics?: Record<string, unknown>
+  financialData?: Record<string, unknown>
+}
+
+/** Pure mapping from a quoteSummary payload to KeyStats. Exported for tests. */
+export function mapKeyStats(raw: RawSummary): KeyStats {
+  const k = raw.defaultKeyStatistics ?? {}
+  const f = raw.financialData ?? {}
+  return {
+    forward_pe: n(k.forwardPE),
+    peg_ratio: n(k.pegRatio),
+    price_to_book: n(k.priceToBook),
+    enterprise_value: n(k.enterpriseValue),
+    book_value: n(k.bookValue),
+    trailing_eps: n(k.trailingEps),
+    forward_eps: n(k.forwardEps),
+    profit_margins: n(k.profitMargins),
+    ebitda_margins: n(f.ebitdaMargins),
+    return_on_equity: n(f.returnOnEquity),
+    revenue_growth: n(f.revenueGrowth),
+    earnings_growth: n(f.earningsGrowth),
+    current_ratio: n(f.currentRatio),
+    quick_ratio: n(f.quickRatio),
+    total_cash: n(f.totalCash),
+    total_debt: n(f.totalDebt),
+    free_cashflow: n(f.freeCashflow),
+    operating_cashflow: n(f.operatingCashflow),
+    target_mean: n(f.targetMeanPrice),
+    target_high: n(f.targetHighPrice),
+    target_low: n(f.targetLowPrice),
+    recommendation_key: s(f.recommendationKey),
+    analyst_count: n(f.numberOfAnalystOpinions),
+    shares_outstanding: n(k.sharesOutstanding),
+    float_shares: n(k.floatShares),
+    held_pct_insiders: n(k.heldPercentInsiders),
+    held_pct_institutions: n(k.heldPercentInstitutions),
+    change_52w: n(k['52WeekChange']),
+  }
+}
+
+/**
+ * Key statistics for one ticker. Returns null when the whole call fails; a
+ * ticker with no analyst coverage still returns an object full of nulls,
+ * which is a real answer and not an error.
+ *
+ * validateResult is off deliberately: strict schema validation discarded the
+ * entire payload for HEAL.JK over three missing optional fields.
+ */
+export async function fetchKeyStats(ticker: string): Promise<KeyStats | null> {
+  const symbol = normalizeTicker(ticker)
+  try {
+    const raw = await withRetry(() =>
+      yf.quoteSummary(symbol, { modules: ['defaultKeyStatistics', 'financialData'] },
+                      { validateResult: false }))
+    return mapKeyStats(raw as RawSummary)
+  } catch (err) {
+    console.error(`[market] keyStats ${symbol}:`, err instanceof Error ? err.message : err)
+    return null
+  }
+}

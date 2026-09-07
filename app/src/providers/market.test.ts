@@ -179,3 +179,51 @@ describe('fetchDividendAmount', () => {
     expect(await fetchDividendAmount('BBCA')).toBeCloseTo(12.29)
   })
 })
+
+describe('mapKeyStats', () => {
+  it('maps a populated payload across both yahoo modules', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: {
+        forwardPE: 19.8, pegRatio: 1.8, priceToBook: 4.1, enterpriseValue: 8.2e14,
+        bookValue: 1630, trailingEps: 312, forwardEps: 340, profitMargins: 0.527,
+        sharesOutstanding: 1.23e11, floatShares: 5.5e10,
+        heldPercentInsiders: 0.549, heldPercentInstitutions: 0.121, '52WeekChange': 0.184,
+      },
+      financialData: {
+        targetMeanPrice: 8194.84, targetHighPrice: 9000, targetLowPrice: 7000,
+        recommendationKey: 'strong_buy', numberOfAnalystOpinions: 25,
+        currentRatio: 1.24, quickRatio: 1.1, returnOnEquity: 0.182,
+        revenueGrowth: 0.081, earningsGrowth: 0.064, ebitdaMargins: 0.61,
+        totalCash: 3.1e14, totalDebt: 9.6e13,
+        freeCashflow: 1.24e13, operatingCashflow: 1.9e13,
+      },
+    })
+    expect(out.forward_pe).toBe(19.8)
+    expect(out.recommendation_key).toBe('strong_buy')
+    expect(out.analyst_count).toBe(25)
+    expect(out.held_pct_insiders).toBe(0.549)
+    expect(out.change_52w).toBe(0.184)
+  })
+
+  it('returns nulls rather than undefined for a sparse small-cap payload', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    // BSSR shape: key statistics present, no analyst coverage at all.
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 2.7, bookValue: 1800 },
+      financialData: {},
+    })
+    expect(out.price_to_book).toBe(2.7)
+    expect(out.target_mean).toBeNull()
+    expect(out.analyst_count).toBeNull()
+    expect(out.forward_pe).toBeNull()
+    expect(Object.values(out).every((v) => v !== undefined)).toBe(true)
+  })
+
+  it('treats an entirely absent module as all nulls', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({})
+    expect(out.target_mean).toBeNull()
+    expect(out.price_to_book).toBeNull()
+  })
+})
