@@ -53,6 +53,7 @@ export default async function TickerDetail({
   const pool = getPool();
   const active = resolveTab(tab);
   const onOverview = active === "overview";
+  const onAnalysis = active === "analysis";
   const onHistory = active === "history";
 
   // Each tab's own tables are only queried when that tab is active; the header
@@ -62,8 +63,8 @@ export default async function TickerDetail({
     pool.query("SELECT * FROM portfolio_positions WHERE ticker = $1 AND active = true LIMIT 1", [t]),
     onHistory ? pool.query("SELECT * FROM stock_transactions WHERE ticker = $1 ORDER BY txn_at DESC", [t]) : NO_ROWS,
     pool.query("SELECT * FROM stock_dividends WHERE ticker = $1 ORDER BY paid_at DESC", [t]),
-    onOverview ? pool.query("SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 20", [t]) : NO_ROWS,
-    onOverview
+    onAnalysis ? pool.query("SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 20", [t]) : NO_ROWS,
+    onAnalysis
       ? pool.query("SELECT * FROM news_with_latest_sentiment WHERE ticker = $1 AND published_at >= $2 ORDER BY published_at DESC LIMIT 30", [t, newsCutoffIso()])
       : NO_ROWS,
     onHistory ? pool.query("SELECT * FROM recommendation_accuracy($1)", [3]) : NO_ROWS,
@@ -177,7 +178,7 @@ export default async function TickerDetail({
         </section>
       )}
 
-      {onOverview && <AnalysisNewsPanels analyses={analyses} news={news} />}
+      {onAnalysis && <AnalysisNewsPanels analyses={analyses} news={news} />}
 
       {active === "financials" && (
         <section>

@@ -4,6 +4,7 @@
 
 export const DETAIL_TABS = [
   { id: "overview", label: "Overview" },
+  { id: "analysis", label: "Analysis" },
   { id: "financials", label: "Financials" },
   { id: "actions", label: "Actions" },
   { id: "history", label: "History" },
