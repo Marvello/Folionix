@@ -1,5 +1,5 @@
 import type { StockKeyStatsRow } from "@/lib/types";
-import { fmtIdr } from "@/lib/format";
+import { fmtIdr, fmtIdrMagnitude, fmtCountCompact } from "@/lib/format";
 
 export type Stat = { label: string; value: string };
 export type Group = { label: string; stats: Stat[] };
@@ -10,6 +10,10 @@ const ratio = (v: number | null | undefined): string | null =>
   v == null ? null : v.toFixed(2);
 const big = (v: number | null | undefined): string | null =>
   v == null ? null : fmtIdr(v);
+/** Large rupiah magnitudes (EV, cash, debt, FCF): compact with an IDR code. */
+const compact = (v: number | null | undefined): string | null => fmtIdrMagnitude(v);
+/** Share counts, not currency: compact with no currency code. */
+const count = (v: number | null | undefined): string | null => fmtCountCompact(v);
 
 /** Only populated stats survive, and an empty group is dropped whole. A thin
  *  small-cap gets a short card instead of a wall of N/A. */
@@ -19,7 +23,7 @@ export function statGroups(r: StockKeyStatsRow): Group[] {
       { label: "Fwd P/E", value: ratio(r.forward_pe) },
       { label: "PEG", value: ratio(r.peg_ratio) },
       { label: "P/B", value: ratio(r.price_to_book) },
-      { label: "EV", value: big(r.enterprise_value) },
+      { label: "EV", value: compact(r.enterprise_value) },
       { label: "Book value", value: big(r.book_value) },
     ]},
     { label: "Profitability", stats: [
@@ -32,9 +36,9 @@ export function statGroups(r: StockKeyStatsRow): Group[] {
     { label: "Health", stats: [
       { label: "Current ratio", value: ratio(r.current_ratio) },
       { label: "Quick ratio", value: ratio(r.quick_ratio) },
-      { label: "Total cash", value: big(r.total_cash) },
-      { label: "Total debt", value: big(r.total_debt) },
-      { label: "Free cash flow", value: big(r.free_cashflow) },
+      { label: "Total cash", value: compact(r.total_cash) },
+      { label: "Total debt", value: compact(r.total_debt) },
+      { label: "Free cash flow", value: compact(r.free_cashflow) },
     ]},
     { label: "Street", stats: [
       { label: "Target", value: big(r.target_mean) },
@@ -46,8 +50,8 @@ export function statGroups(r: StockKeyStatsRow): Group[] {
     { label: "Ownership", stats: [
       { label: "Insiders", value: pct(r.held_pct_insiders) },
       { label: "Institutions", value: pct(r.held_pct_institutions) },
-      { label: "Float", value: big(r.float_shares) },
-      { label: "Shares out", value: big(r.shares_outstanding) },
+      { label: "Float", value: count(r.float_shares) },
+      { label: "Shares out", value: count(r.shares_outstanding) },
       { label: "52w change", value: pct(r.change_52w) },
     ]},
   ].map((g) => ({

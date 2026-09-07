@@ -28,6 +28,34 @@ export function fmtIdrCompact(v: number | null | undefined): string {
   return fmtIdr(v);
 }
 
+/**
+ * Compact IDR magnitude for large balance-sheet figures (enterprise value,
+ * cash, debt, revenue): >=1T/1B/1M gets a suffix, matching lib/format.ts's
+ * fmtCap thresholds, but with the brand's explicit "IDR" code instead of a
+ * bare "Rp" symbol. Falls back to fmtIdr below 1M. Negative values keep sign.
+ */
+export function fmtIdrMagnitude(v: number | null | undefined): string | null {
+  if (v == null) return null;
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1e12) return `${sign}IDR ${(abs / 1e12).toFixed(2).replace(".", ",")}T`;
+  if (abs >= 1e9) return `${sign}IDR ${(abs / 1e9).toFixed(2).replace(".", ",")}B`;
+  if (abs >= 1e6) return `${sign}IDR ${(abs / 1e6).toFixed(2).replace(".", ",")}M`;
+  return fmtIdr(v);
+}
+
+/** Compact plain count (shares, not money) - same T/B/M scale, no currency code. */
+export function fmtCountCompact(v: number | null | undefined): string | null {
+  if (v == null) return null;
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1e12) return `${sign}${(abs / 1e12).toFixed(2).replace(".", ",")}T`;
+  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2).replace(".", ",")}B`;
+  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(2).replace(".", ",")}M`;
+  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(2).replace(".", ",")}K`;
+  return v.toLocaleString("id-ID");
+}
+
 /** Format an amount in any currency. IDR uses id-ID locale (1.234.567); others use en-US (1,234.56). */
 export function fmtCurrency(
   v: number | null | undefined,

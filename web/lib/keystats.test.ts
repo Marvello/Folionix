@@ -23,4 +23,19 @@ describe("statGroups", () => {
     expect(statGroups(full).map((g) => g.label))
       .toEqual(["Valuation", "Profitability", "Health", "Street", "Ownership"]);
   });
+
+  it("renders large rupiah magnitudes compactly, and share counts with no currency code (regression for defect B)", () => {
+    const full = {
+      ...sparse,
+      enterprise_value: 797272631672832,
+      shares_outstanding: 122876240600,
+    } as StockKeyStatsRow;
+    const groups = statGroups(full);
+    const ev = groups.find((g) => g.label === "Valuation")!.stats.find((s) => s.label === "EV")!;
+    expect(ev.value).toBe("IDR 797,27T");
+    const sharesOut = groups.find((g) => g.label === "Ownership")!.stats.find((s) => s.label === "Shares out")!;
+    expect(sharesOut.value).toBe("122,88B");
+    expect(sharesOut.value).not.toContain("IDR");
+    expect(sharesOut.value).not.toContain("Rp");
+  });
 });

@@ -1,5 +1,5 @@
 import type { StockFinancialRow } from "@/lib/types";
-import { fmtIdr, fmtAgo } from "@/lib/format";
+import { fmtIdrMagnitude, fmtAgo } from "@/lib/format";
 import { Sparkline } from "./Sparkline";
 import EmptyState from "./EmptyState";
 
@@ -9,6 +9,12 @@ const STALE_MS = 7 * 24 * 3_600_000;
 function quarterLabel(periodEnd: string): string {
   const [y, m] = periodEnd.split("-");
   return `Q${Math.ceil(Number(m) / 3)} ${y}`;
+}
+
+/** EPS column only earns its place when at least one row has a value, mirroring
+ *  how statGroups drops a group whose stats are all empty. */
+export function showEpsColumn(rows: StockFinancialRow[]): boolean {
+  return rows.some((r) => r.eps != null);
 }
 
 /** Oldest-to-newest series for a column, or null when fewer than two points. */
@@ -46,6 +52,7 @@ export default function FinancialsTable({ rows }: { rows: StockFinancialRow[] })
   }
   const newest = rows[0]!;
   const stale = Date.now() - new Date(newest.fetched_at).getTime() > STALE_MS;
+  const withEps = showEpsColumn(rows);
   return (
     <section>
       <div className="mb-3 flex items-baseline justify-between">
@@ -63,7 +70,7 @@ export default function FinancialsTable({ rows }: { rows: StockFinancialRow[] })
               <th className="py-2 text-right font-normal">Revenue</th>
               <th className="py-2 text-right font-normal">Net income</th>
               <th className="py-2 text-right font-normal">Net margin</th>
-              <th className="py-2 text-right font-normal">EPS</th>
+              {withEps && <th className="py-2 text-right font-normal">EPS</th>}
             </tr>
           </thead>
           <tbody>
@@ -71,20 +78,22 @@ export default function FinancialsTable({ rows }: { rows: StockFinancialRow[] })
               <tr key={`${r.period_end}-${r.period_type}`} className="border-b border-edge/50">
                 <td className="py-2 text-tsecondary">{quarterLabel(r.period_end)}</td>
                 <td className="num py-2 text-right text-tprimary">
-                  {r.revenue == null ? "N/A" : fmtIdr(r.revenue)}
+                  {r.revenue == null ? "N/A" : fmtIdrMagnitude(r.revenue)}
                 </td>
                 <td className={`num py-2 text-right ${
                   r.net_income == null ? "text-tprimary"
                     : r.net_income >= 0 ? "text-up" : "text-down"}`}>
                   {r.net_income == null ? "N/A"
-                    : `${r.net_income >= 0 ? "▲ " : "▼ "}${fmtIdr(Math.abs(r.net_income))}`}
+                    : `${r.net_income >= 0 ? "▲ " : "▼ "}${fmtIdrMagnitude(Math.abs(r.net_income))}`}
                 </td>
                 <td className="num py-2 text-right text-tsecondary">
                   {r.net_margin_pct == null ? "N/A" : `${r.net_margin_pct.toFixed(1)}%`}
                 </td>
-                <td className="num py-2 text-right text-tsecondary">
-                  {r.eps == null ? "N/A" : r.eps.toFixed(2)}
-                </td>
+                {withEps && (
+                  <td className="num py-2 text-right text-tsecondary">
+                    {r.eps == null ? "N/A" : r.eps.toFixed(2)}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
