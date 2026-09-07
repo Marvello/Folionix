@@ -324,8 +324,11 @@ export function mapKeyStats(raw: RawSummary, fxToIdr: Map<string, number>): KeyS
     }),
     enterprise_value: n(k.enterpriseValue),
     book_value: correctPerShare(rawBookValue, financialCurrency, quoteCurrency, fxToIdr),
-    trailing_eps: correctPerShare(n(k.trailingEps), financialCurrency, quoteCurrency, fxToIdr),
-    forward_eps: correctPerShare(n(k.forwardEps), financialCurrency, quoteCurrency, fxToIdr),
+    // Unlike bookValue, yahoo's trailingEps/forwardEps are already expressed
+    // in the quote currency (verified: price / trailingEps reproduces yahoo's
+    // own trailingPE for USD-reporting issuers too) - do not convert these.
+    trailing_eps: n(k.trailingEps),
+    forward_eps: n(k.forwardEps),
     profit_margins: n(k.profitMargins),
     ebitda_margins: n(f.ebitdaMargins),
     return_on_equity: n(f.returnOnEquity),

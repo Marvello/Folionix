@@ -227,30 +227,48 @@ describe('mapKeyStats', () => {
     expect(out.price_to_book).toBeNull()
   })
 
-  it('corrects price_to_book and book_value for a USD-reporting issuer (BSSR shape)', async () => {
+  it('corrects price_to_book and book_value for a USD-reporting issuer (BSSR shape), leaves trailing_eps alone', async () => {
     const { mapKeyStats } = await import('./market.js')
     const out = mapKeyStats({
-      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102 },
+      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102, trailingEps: 659.63 },
       financialData: { financialCurrency: 'USD' },
       summaryDetail: { currency: 'IDR' },
       price: { regularMarketPrice: 4950 },
     }, new Map([['USD', 16200]]))
     expect(out.price_to_book).toBeCloseTo(3.0, 1)
     expect(out.book_value).toBeCloseTo(1652.4, 0)
+    // trailingEps is already in the quote currency, unlike bookValue - must not be converted.
+    expect(out.trailing_eps).toBe(659.63)
   })
 
-  it('nulls price_to_book, book_value, trailing_eps and forward_eps when no fx rate is available', async () => {
+  it('nulls price_to_book and book_value when no fx rate is available, but leaves trailing_eps/forward_eps untouched', async () => {
     const { mapKeyStats } = await import('./market.js')
     const out = mapKeyStats({
-      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102, trailingEps: 0.01, forwardEps: 0.012 },
+      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102, trailingEps: 659.63, forwardEps: 700 },
       financialData: { financialCurrency: 'USD' },
       summaryDetail: { currency: 'IDR' },
       price: { regularMarketPrice: 4950 },
     }, new Map())
     expect(out.price_to_book).toBeNull()
     expect(out.book_value).toBeNull()
-    expect(out.trailing_eps).toBeNull()
-    expect(out.forward_eps).toBeNull()
+    // These never needed an fx rate - an empty rate map must not null them.
+    expect(out.trailing_eps).toBe(659.63)
+    expect(out.forward_eps).toBe(700)
+  })
+
+  it('yields a plausible P/E from the corrected trailing_eps for a USD-reporting issuer (BSSR shape)', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const price = 4950
+    const out = mapKeyStats({
+      defaultKeyStatistics: { trailingEps: 659.63 },
+      financialData: { financialCurrency: 'USD' },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: price },
+    }, new Map([['USD', 16200]]))
+    // Guards against re-introducing a currency conversion on EPS: a wrong unit
+    // would blow this ratio up by roughly the fx rate instead of landing near
+    // yahoo's own published trailingPE of ~7.5 for BSSR.
+    expect(price / (out.trailing_eps as number)).toBeCloseTo(7.5, 1)
   })
 
   it('passes price_to_book, book_value, trailing_eps and forward_eps through unchanged when currencies agree (BBCA shape)', async () => {
