@@ -227,3 +227,39 @@ describe('mapKeyStats', () => {
     expect(out.price_to_book).toBeNull()
   })
 })
+
+describe('mapFinancialPeriod', () => {
+  it('computes margins from revenue', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod({
+      endDate: new Date('2026-06-30T00:00:00Z'),
+      totalRevenue: 28157061000000,
+      costOfRevenue: 9412330000000,
+      grossProfit: 18744731000000,
+      operatingIncome: 14641847000000,
+      netIncome: 14850323000000,
+    }, 'IDR')
+    expect(out.period_end).toBe('2026-06-30')
+    expect(out.period_type).toBe('QUARTERLY')
+    expect(out.net_margin_pct).toBeCloseTo(52.74, 1)
+    expect(out.gross_margin_pct).toBeCloseTo(66.57, 1)
+    expect(out.currency).toBe('IDR')
+  })
+
+  it('returns null margins when revenue is zero, never Infinity or NaN', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod(
+      { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 0, netIncome: -5e9 }, 'IDR')
+    expect(out.net_margin_pct).toBeNull()
+    expect(out.gross_margin_pct).toBeNull()
+    expect(out.net_income).toBe(-5e9)
+  })
+
+  it('returns null margins when revenue is absent', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod({ endDate: new Date('2026-03-31T00:00:00Z') }, null)
+    expect(out.revenue).toBeNull()
+    expect(out.net_margin_pct).toBeNull()
+    expect(out.currency).toBeNull()
+  })
+})

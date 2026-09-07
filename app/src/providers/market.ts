@@ -337,3 +337,88 @@ export async function fetchKeyStats(ticker: string): Promise<KeyStats | null> {
     return null
   }
 }
+
+export interface FinancialPeriod {
+  period_end: string
+  period_type: 'QUARTERLY' | 'ANNUAL'
+  revenue: number | null
+  cost_of_revenue: number | null
+  gross_profit: number | null
+  operating_income: number | null
+  net_income: number | null
+  eps: number | null
+  gross_margin_pct: number | null
+  operating_margin_pct: number | null
+  net_margin_pct: number | null
+  currency: string | null
+}
+
+/** Margin as a percentage, or null when the denominator is missing or zero. */
+function marginPct(part: number | null, revenue: number | null): number | null {
+  if (part == null || revenue == null || revenue === 0) return null
+  const pct = (part / revenue) * 100
+  return Number.isFinite(pct) ? Math.round(pct * 100) / 100 : null
+}
+
+/** Slice a Date or ISO string to YYYY-MM-DD. */
+function toDay(v: unknown): string | null {
+  if (v instanceof Date) return v.toISOString().slice(0, 10)
+  if (typeof v === 'string' && v.length >= 10) return v.slice(0, 10)
+  return null
+}
+
+/**
+ * Pure mapping of one yahoo income-statement row. Margins are computed here,
+ * on write, so consumers (and a future prompt change) read one column instead
+ * of redoing the arithmetic.
+ */
+export function mapFinancialPeriod(
+  row: Record<string, unknown>, currency: string | null,
+): FinancialPeriod {
+  const revenue = n(row.totalRevenue)
+  return {
+    period_end: toDay(row.endDate) ?? '1970-01-01',
+    period_type: 'QUARTERLY',
+    revenue,
+    cost_of_revenue: n(row.costOfRevenue),
+    gross_profit: n(row.grossProfit),
+    operating_income: n(row.operatingIncome),
+    net_income: n(row.netIncome),
+    eps: n(row.dilutedEPS) ?? n(row.basicEPS),
+    gross_margin_pct: marginPct(n(row.grossProfit), revenue),
+    operating_margin_pct: marginPct(n(row.operatingIncome), revenue),
+    net_margin_pct: marginPct(n(row.netIncome), revenue),
+    currency,
+  }
+}
+
+/**
+ * Recent quarterly income statements, newest first. [] when the issuer has
+ * none published, which is the normal state for thin IDX small-caps.
+ *
+ * yahoo-finance2 prints a deprecation notice for this module and steers to
+ * fundamentalsTimeSeries. It still returned 4 periods for 4 of 5 probed IDX
+ * tickers. If it goes empty across the board, switch to fundamentalsTimeSeries
+ * here; nothing above this function needs to change.
+ */
+export async function fetchFinancials(ticker: string): Promise<FinancialPeriod[]> {
+  const symbol = normalizeTicker(ticker)
+  try {
+    const raw = await withRetry(() =>
+      yf.quoteSummary(symbol,
+        { modules: ['incomeStatementHistoryQuarterly', 'summaryDetail'] },
+        { validateResult: false })) as {
+          incomeStatementHistoryQuarterly?: { incomeStatementHistory?: Record<string, unknown>[] }
+          summaryDetail?: { currency?: string }
+        }
+    const rows = raw.incomeStatementHistoryQuarterly?.incomeStatementHistory ?? []
+    const currency = s(raw.summaryDetail?.currency)?.toUpperCase() ?? null
+    return rows
+      .map((r) => mapFinancialPeriod(r, currency))
+      .filter((p) => p.period_end !== '1970-01-01')
+      .sort((a, b) => b.period_end.localeCompare(a.period_end))
+  } catch (err) {
+    console.error(`[market] financials ${symbol}:`, err instanceof Error ? err.message : err)
+    return []
+  }
+}
