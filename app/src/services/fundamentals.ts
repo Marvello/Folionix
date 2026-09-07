@@ -5,6 +5,7 @@ import {
 } from '../db/db.js'
 import { fetchKeyStats, fetchFinancials, fetchSplits } from '../providers/market.js'
 import { normalizeTicker } from '../../../lib/format.js'
+import { mapPool } from '../utils/mapPool.js'
 
 // ── FUNDAMENTALS REFRESH ──
 
@@ -52,17 +53,15 @@ export async function refreshFundamentals(tickers?: string[]): Promise<RefreshRe
     ? all.filter((t) => tickers.map(normalizeTicker).includes(t))
     : all
 
-  const results: RefreshResult[] = new Array(wanted.length)
-  let cursor = 0
-  const workers = Array.from({ length: Math.min(CONCURRENCY, wanted.length) }, async () => {
-    while (cursor < wanted.length) {
-      const i = cursor++
-      results[i] = await refreshOne(wanted[i]!)
-    }
-  })
-  await Promise.all(workers)
-  return results
+  const settled = await mapPool(wanted, CONCURRENCY, refreshOne)
+  return settled.map((s, i) =>
+    s.status === 'fulfilled'
+      ? s.value
+      : { ticker: wanted[i]!, keyStats: false, periods: 0, splits: 0, error: s.reason instanceof Error ? s.reason.message : String(s.reason) },
+  )
 }
+
+// ── CLI entry ──
 
 if (process.argv[1]?.endsWith('fundamentals.ts') || process.argv[1]?.endsWith('fundamentals.js')) {
   const args = process.argv.slice(2).filter((a) => !a.startsWith('--'))
