@@ -313,3 +313,68 @@ export interface PersonaAnalysisRow {
   model?: string | null
   analysed_at?: string
 }
+
+// One row of stock_key_stats (slow-moving fundamentals, one per ticker)
+export interface StockKeyStatsRow {
+  ticker: string
+  fetched_at: string
+  forward_pe: number | null
+  peg_ratio: number | null
+  price_to_book: number | null
+  enterprise_value: number | null
+  book_value: number | null
+  trailing_eps: number | null
+  forward_eps: number | null
+  profit_margins: number | null
+  ebitda_margins: number | null
+  return_on_equity: number | null
+  revenue_growth: number | null
+  earnings_growth: number | null
+  current_ratio: number | null
+  quick_ratio: number | null
+  total_cash: number | null
+  total_debt: number | null
+  free_cashflow: number | null
+  operating_cashflow: number | null
+  target_mean: number | null
+  target_high: number | null
+  target_low: number | null
+  recommendation_key: string | null
+  analyst_count: number | null
+  shares_outstanding: number | null
+  float_shares: number | null
+  held_pct_insiders: number | null
+  held_pct_institutions: number | null
+  change_52w: number | null
+}
+
+// One row of stock_financials (one reporting period per ticker)
+export interface StockFinancialRow {
+  ticker: string
+  period_end: string
+  period_type: 'QUARTERLY' | 'ANNUAL'
+  revenue: number | null
+  cost_of_revenue: number | null
+  gross_profit: number | null
+  operating_income: number | null
+  net_income: number | null
+  eps: number | null
+  gross_margin_pct: number | null
+  operating_margin_pct: number | null
+  net_margin_pct: number | null
+  currency: string | null
+  source: string
+  fetched_at: string
+}
+
+// One row of the corporate_actions_all view (corporate_actions + dividend_schedule)
+export interface CorporateActionRow {
+  ticker: string
+  type: 'DIVIDEND' | 'SPLIT' | 'RIGHTS' | 'BONUS' | 'RUPS'
+  event_date: string
+  ex_date: string | null
+  ratio: number | null
+  amount: number | null
+  details: Record<string, unknown>
+  source: string
+}
