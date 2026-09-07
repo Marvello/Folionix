@@ -28,7 +28,7 @@ import { getPool } from './db.js'
  *
  * Bump this when schema.sql is re-snapshotted to fold in newer migrations.
  */
-export const SCHEMA_BASELINE = '036'
+export const SCHEMA_BASELINE = '039'
 
 /** Advisory-lock key, arbitrary but stable — serializes concurrent starts. */
 const LOCK_KEY = 43_370_037
