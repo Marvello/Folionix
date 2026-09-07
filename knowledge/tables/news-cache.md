@@ -2,8 +2,8 @@
 type: table
 title: news_cache
 description: Deduplicated cache of fetched news articles (RSS) per ticker or macro, keyed by unique URL.
-resource: supabase/schema.sql
-tags: [supabase, news, rss, cache]
+resource: db/schema.sql
+tags: [postgres, news, rss, cache]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

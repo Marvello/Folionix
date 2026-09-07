@@ -2,8 +2,8 @@
 type: dataset
 title: news_with_latest_sentiment
 description: View joining each news_cache row to the latest sentiment for its ticker.
-resource: supabase/schema.sql
-tags: [supabase, view, news, sentiment]
+resource: db/schema.sql
+tags: [postgres, view, news, sentiment]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

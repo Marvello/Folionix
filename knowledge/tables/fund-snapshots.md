@@ -2,8 +2,8 @@
 type: table
 title: fund_snapshots
 description: Per-fund NAV-per-unit history, one row per fund per NAV date.
-resource: supabase/migrations/005_funds_bonds.sql
-tags: [supabase, funds, snapshot]
+resource: db/migrations/005_funds_bonds.sql
+tags: [postgres, funds, snapshot]
 generated:
   by: human:marvellooni
   at: 2026-06-23T00:00:00Z

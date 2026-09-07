@@ -30,7 +30,7 @@ skills-lock.json
 .superpowers/
 
 # Local one-time data imports (personal data, never commit)
-supabase/imports/
+db/imports/
 coverage/
 
 # generated knowledge-graph artifact (regenerate with `graphify update .`)

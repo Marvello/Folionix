@@ -51,3 +51,39 @@ describe('evaluateAlert', () => {
     expect(r.isSame).toBe(false)
   })
 })
+
+describe('shouldReanalyze', () => {
+  const now = new Date('2026-09-03T08:00:00Z')
+  const at = (h: number) => ({ analysed_at: new Date(now.getTime() - h * 3_600_000).toISOString() })
+
+  it('runs when there is no prior call', async () => {
+    const { shouldReanalyze } = await import('./alerts.js')
+    expect(shouldReanalyze(null, null, 4420, 0.02, 72, now).reanalyze).toBe(true)
+  })
+
+  it('skips a flat, fresh ticker — the BMRI flip-flop case', async () => {
+    const { shouldReanalyze } = await import('./alerts.js')
+    // 15 min after a call at 4420, price 4410: 0.23% move
+    expect(shouldReanalyze(at(0.25), 4420, 4410, 0.02, 72, now).reanalyze).toBe(false)
+  })
+
+  it('still skips across a WIB day boundary while price is flat', async () => {
+    const { shouldReanalyze } = await import('./alerts.js')
+    expect(shouldReanalyze(at(30), 4420, 4430, 0.02, 72, now).reanalyze).toBe(false)
+  })
+
+  it('runs once price clears the stability threshold', async () => {
+    const { shouldReanalyze } = await import('./alerts.js')
+    expect(shouldReanalyze(at(4), 4250, 4420, 0.02, 72, now).reanalyze).toBe(true)
+  })
+
+  it('runs when the call goes stale even if price never moved', async () => {
+    const { shouldReanalyze } = await import('./alerts.js')
+    expect(shouldReanalyze(at(80), 4420, 4420, 0.02, 72, now).reanalyze).toBe(true)
+  })
+
+  it('runs when price is unavailable rather than silently holding', async () => {
+    const { shouldReanalyze } = await import('./alerts.js')
+    expect(shouldReanalyze(at(1), null, 4420, 0.02, 72, now).reanalyze).toBe(true)
+  })
+})

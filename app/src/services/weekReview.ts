@@ -129,6 +129,8 @@ export function buildNumbersSection(
   return lines.join('\n')
 }
 
+const ACCURACY_CLASSES = ['BUY-ISH', 'SELL-ISH', 'HOLD-ISH'] as const
+
 export function buildLedgerSection(
   ledger: RecLedgerEntry[],
   accuracy: RecommendationAccuracyRow[],
@@ -156,6 +158,17 @@ export function buildLedgerSection(
     lines.push(
       `**Recommendation accuracy** (last ${scored.length} scored recs, price ${accuracy[0]?.days_after ?? 3} days after): ` +
       `${hits}/${scored.length} correct (${((hits / scored.length) * 100).toFixed(0)}%).`,
+      '',
+      // The blended number is dominated by whichever class is most numerous,
+      // and HOLD-ish outnumbers everything. Split it so a desk that is 92% right
+      // about doing nothing and 33% right about acting cannot report one figure.
+      '| Class | Scored | Correct | Rate |',
+      '|---|---:|---:|---:|',
+      ...ACCURACY_CLASSES.map(cls => {
+        const rows = scored.filter(a => a.rec_class === cls)
+        const ok = rows.filter(a => a.correct).length
+        return `| ${cls} | ${rows.length} | ${ok} | ${rows.length === 0 ? '—' : `${((ok / rows.length) * 100).toFixed(0)}%`} |`
+      }),
       '',
     )
   } else if (failures.accuracy) {
@@ -210,10 +223,10 @@ export function buildHandoverDoc(args: {
         ? '_⚠️ Scoring query failed — accuracy data is missing, not empty._'
         : '_No scored recommendations available._']
     : [
-        '| Ticker | Rec | Analysed | Price@Rec | Price+Nd | Move | Correct |',
-        '|---|---|---|---:|---:|---:|---|',
+        '| Ticker | Rec | Class | Analysed | Price@Rec | Price+Nd | Move | IHSG | Correct |',
+        '|---|---|---|---|---:|---:|---:|---:|---|',
         ...args.accuracy.map(a =>
-          `| ${displayTicker(a.ticker)} | ${a.recommendation} | ${(a.analysed_at ?? '').slice(0, 10)} | ${a.price_at_rec ?? 'N/A'} | ${a.price_after ?? 'N/A'} | ${pct(a.actual_change_pct)} | ${a.correct == null ? 'N/A' : a.correct ? 'yes' : 'no'} |`),
+          `| ${displayTicker(a.ticker)} | ${a.recommendation} | ${a.rec_class ?? 'N/A'} | ${(a.analysed_at ?? '').slice(0, 10)} | ${a.price_at_rec ?? 'N/A'} | ${a.price_after ?? 'N/A'} | ${pct(a.actual_change_pct)} | ${pct(a.benchmark_change_pct)} | ${a.correct == null ? 'N/A' : a.correct ? 'yes' : 'no'} |`),
       ]
   return [
     `# Folionix Analysis Handover — week ${args.weekStart} → ${args.weekEnd}`,
@@ -233,7 +246,7 @@ export function buildHandoverDoc(args: {
     '- Held positions get action sizing vs a Rp 1,000,000 materiality threshold but must still state a market view; watchlist tickers are asked for a pure entry signal (BUY / MONITOR / HOLD) with no threshold.',
     '- Recommendation extracted from the REKOMENDASI line (fallback: keyword scan): AVERAGE DOWN, TAKE PROFIT, CUT LOSS, HOLD, MONITOR, BUY, TRIM.',
     '- Data sources today: yahoo-finance2 (prices + fundamentals), Google News RSS (sentiment), own snapshot history (technicals), Finnhub (optional fallback, USD). No broker flow, no order-book data, no sector benchmarks.',
-    '- Accuracy scoring: one rec per ticker per WIB day (the last); BUY-ish correct when price rises after N days, SELL-ish when it falls, HOLD-ish when |move| < 5%.',
+    '- Accuracy scoring: one rec per ticker per WIB day (the last); BUY-ish correct when price rises after N days, SELL-ish when it falls. HOLD-ish is scored against IHSG — correct when the ticker tracked the index within 1.5pp over the window, since a HOLD is a decision to do nothing and the question is whether doing nothing cost anything. Absolute |move| < 5% is the fallback only when no IHSG snapshot brackets the window.',
     '',
     args.numbersSection,
     args.ledgerSection,

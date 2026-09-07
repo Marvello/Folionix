@@ -2,8 +2,8 @@
 type: dataset
 title: latest_gold_prices
 description: View exposing the single most-recent gold_snapshots row per venue.
-resource: supabase/schema.sql
-tags: [supabase, view, gold]
+resource: db/schema.sql
+tags: [postgres, view, gold]
 generated:
   by: human:marvellooni
   at: 2026-06-19T00:00:00Z

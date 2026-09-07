@@ -17,7 +17,7 @@ A unified wealth tracker across four asset classes — IDX stocks, gold, mutual 
 
 ```
   yahoo-finance2  ──┐
-   Cermati (gold) ──┼──▶ Supabase ──▶ Ollama ──▶ Telegram alerts
+   Cermati (gold) ──┼──▶ Postgres ──▶ Ollama ──▶ Telegram alerts
    Cermati (funds)──┤              └──▶ Next.js dashboard
      KSEI (bonds) ──┘
 ```
@@ -28,7 +28,7 @@ A unified wealth tracker across four asset classes — IDX stocks, gold, mutual 
 - Sends Telegram alerts: BUY / HOLD / MONITOR / CUT LOSS
 - Tracks watchlist with BUY NOW / WAIT / AVOID verdicts
 - Signal-aware LangGraph orchestrator monitors during market hours
-- Optional multi-agent deep runs on major signals: deterministic analyst scores + up to 12 LLM investor personas (Buffett, Burry, …) voting into a weighted consensus, processed async via a Supabase job queue
+- Optional multi-agent deep runs on major signals: deterministic analyst scores + up to 12 LLM investor personas (Buffett, Burry, …) voting into a weighted consensus, processed async via a Postgres job queue
 
 **Gold**
 - Tracks purchases per venue (Cermati GraphQL)
@@ -46,8 +46,8 @@ A unified wealth tracker across four asset classes — IDX stocks, gold, mutual 
 - Tracks days to maturity
 
 **Dashboard**
-- Next.js 16 + Tailwind — Portfolio, Watchlist, News, Gold, Funds, Bonds
-- All CRUD via centered modal dialogs; reads/writes Supabase directly under Auth + RLS
+- Next.js 16 + Tailwind — Stocks, News, Gold, Funds, Bonds, Reviews
+- All CRUD via centered modal dialogs; reads/writes Postgres directly through its own pool, behind NextAuth
 
 ## Quick Start
 
@@ -56,7 +56,7 @@ A unified wealth tracker across four asset classes — IDX stocks, gold, mutual 
 - Node 22+ (both backend and frontend)
 - [Ollama](https://ollama.ai) running locally with a model (default: `qwen2.5:7b`)
 - Telegram bot token ([create one](https://core.telegram.org/bots#botfather))
-- A **self-hosted Supabase** stack — see the [Supabase foundation runbook](knowledge/runbooks/supabase-foundation.md) for bootstrap steps
+- **Postgres 17** — shipped as the `folionix-db` compose service; see the [Postgres foundation runbook](knowledge/runbooks/postgres-foundation.md) for bootstrap steps
 
 ### 1. Clone & Configure
 
@@ -64,27 +64,33 @@ A unified wealth tracker across four asset classes — IDX stocks, gold, mutual 
 git clone https://github.com/Marvello/Folionix.git
 cd Folionix
 cp .env.example .env
-# Edit .env: SUPABASE_URL/SUPABASE_SERVICE_KEY (backend),
-# NEXT_PUBLIC_SUPABASE_URL/NEXT_PUBLIC_SUPABASE_ANON_KEY (web),
+# Edit .env: DATABASE_URL (backend + web share it), AUTH_SECRET,
 # LLM_BACKEND/LLM_MODEL/LLM_API_BASE, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID
 ```
 
-### 2. Stand Up Supabase
+### 2. Stand Up Postgres
 
-Bootstrap a self-hosted Supabase stack, apply `supabase/schema.sql` (+ `migrations/`),
-enable Auth, and create your single user. Optionally pre-load `supabase/seed.sql`
-for starter positions and watchlist.
+```bash
+docker compose -f docker/docker-compose.yml up -d folionix-db
+psql "$DATABASE_URL" -f db/schema.sql
+# then db/migrations/037_*.sql onward, in numeric order
+# (schema.sql already contains migrations 001-036 — do not replay them)
+```
+
+Create your single user by inserting a row into `public.users` with a bcrypt
+`password_hash` — there is no public sign-up. Optionally pre-load
+`db/seed.sql` for starter positions and watchlist.
 
 ### 3. Set Up Portfolio
 
-Positions and watchlist live in Supabase (the source of truth) — add them via the
+Positions and watchlist live in Postgres (the source of truth) — add them via the
 Telegram bot (`/add BBCA 9500 10`, `/wadd TLKM`) or the web UI.
 
 > **Note:** 1 lot = 100 shares. Tickers use IDX codes without `.JK` suffix.
 
 ### 4. Run
 
-**With Docker (recommended)** — Supabase stack must already be up:
+**With Docker (recommended)** — brings up the database alongside the services:
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
@@ -113,7 +119,7 @@ cd web && npm install && npm run dev    # http://localhost:3000
 ```
 app/                        # Node 22 TypeScript backend (ESM, esbuild)
 ├── src/
-│   ├── db/db.ts            # Supabase data layer
+│   ├── db/db.ts            # Postgres data layer (node-postgres)
 │   ├── providers/          # market.ts (yahoo-finance2), finnhub.ts, cermati.ts, ksei.ts
 │   ├── ai/                 # llm.ts (Vercel AI SDK), prompts.ts, scores.ts, personas.ts, consensus.ts
 │   ├── services/           # portfolio.ts, news.ts, watchlist.ts, gold.ts, funds.ts, bonds.ts
@@ -121,13 +127,13 @@ app/                        # Node 22 TypeScript backend (ESM, esbuild)
 │   ├── bot/bot.ts          # grammy Telegram bot (14 commands)
 │   └── graph/              # LangGraph orchestrator (state/session/signals/analysis/orchestrator/runner) + worker.ts (deep-run queue)
 lib/                        # Shared TypeScript (app/ + web/)
-├── types.ts                # Supabase row interfaces
+├── types.ts                # Postgres row interfaces
 └── format.ts               # Shared helpers (fmtIdr, calcPnl, normalizeTicker, …)
 web/                        # Next.js + Tailwind frontend (App Router)
 ├── app/                    # routes: /, /portfolio, /watchlist, /news, /gold, /funds, /bonds, /login
 ├── components/             # Nav, MetricCard, RecommendationBadge, modals
-└── lib/                    # format.ts, types.ts, supabase/{client,server}.ts
-supabase/                   # Schema, migrations, seed, key-gen tool
+└── lib/                    # format.ts, types.ts, db.ts (pg pool), auth.ts (NextAuth)
+db/                         # Postgres schema, migrations, seed
 docker/                     # Dockerfile.app, Dockerfile.web, docker-compose.yml
 ```
 
@@ -142,7 +148,7 @@ docker/                     # Dockerfile.app, Dockerfile.web, docker-compose.yml
 
 `folionix-bot`/`folionix-graph`/`folionix-worker` use `marvellooni/folionix-app:latest`; `folionix-web` uses `marvellooni/folionix-web:latest`.
 `NEXT_PUBLIC_*` env vars are read at runtime (injected via `window.__ENV`) — the image is environment-agnostic.
-Self-hosted Supabase runs as a **separate stack not part of this repo**. Containers run as non-root.
+Postgres runs as the `folionix-db` compose service with a `pgdata` volume. Containers run as non-root.
 
 Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-compose.yml up -d`.
 
@@ -169,8 +175,8 @@ Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-
 
 | Variable | Description |
 |----------|-------------|
-| `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Backend Supabase (service key, never in frontend) |
-| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Web UI Supabase (browser-reachable) |
+| `DATABASE_URL` | Postgres connection string — read by both `app/` and `web/`; server-side only |
+| `AUTH_SECRET` / `AUTH_URL` | NextAuth session signing and base URL (web) |
 | `LLM_BACKEND` | `ollama` or `litellm` |
 | `LLM_MODEL` | LLM model name (e.g. `qwen2.5:7b`) |
 | `LLM_API_BASE` | LLM API endpoint |
@@ -212,7 +218,7 @@ The LangGraph orchestrator (`folionix-graph`) replaces cron with adaptive, signa
 - **Data:** yahoo-finance2 (primary), Finnhub (fallback), Cermati (gold + funds), KSEI (bond coupons)
 - **LLM:** Vercel AI SDK — Ollama or LiteLLM backend (any model)
 - **Orchestration:** @langchain/langgraph (session-aware, signal-driven)
-- **Database:** self-hosted Supabase (Postgres + PostgREST) via @supabase/supabase-js
+- **Database:** self-hosted Postgres 17 via node-postgres (raw SQL, no ORM)
 - **Bot:** grammy (Telegram, long-polling)
 - **UI:** Next.js 16 + Tailwind (`web/`)
 - **CI/CD:** GitHub Actions → Docker Hub (multi-arch: amd64 + arm64)

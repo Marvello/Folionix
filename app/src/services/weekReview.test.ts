@@ -13,9 +13,10 @@ const agg = (positions: AggregateInput['positions'], snapshots: AggregateInput['
   aggregatePortfolio({ ...emptyInput(), positions, snapshots })
 
 const accuracyRow = (over: Partial<RecommendationAccuracyRow> = {}): RecommendationAccuracyRow => ({
-  ticker: 'BBCA', recommendation: 'BUY', analysed_at: '2026-07-10T02:00:00Z',
+  ticker: 'BBCA', recommendation: 'BUY', rec_class: 'BUY-ISH',
+  analysed_at: '2026-07-10T02:00:00Z',
   price_at_rec: 9000, price_after: 9200, days_after: 3,
-  actual_change_pct: 2.22, correct: true, ...over,
+  actual_change_pct: 2.22, benchmark_change_pct: 0.5, correct: true, ...over,
 })
 
 describe('buildNumbersSection', () => {
@@ -65,6 +66,26 @@ describe('buildLedgerSection', () => {
   it('flags a failed accuracy query instead of staying silent', () => {
     const md = buildLedgerSection([], [], { accuracy: true })
     expect(md).toContain('Recommendation accuracy unavailable')
+  })
+
+  it('splits accuracy by class so a HOLD-heavy sample cannot hide bad calls', () => {
+    // 4 HOLD-ish all right, 2 actionable both wrong: blended 67%, but the
+    // classes are 100% and 0% — the split is the point.
+    const md = buildLedgerSection([], [
+      ...Array.from({ length: 4 }, () => accuracyRow({ recommendation: 'HOLD', rec_class: 'HOLD-ISH', correct: true })),
+      accuracyRow({ recommendation: 'CUT LOSS', rec_class: 'SELL-ISH', correct: false }),
+      accuracyRow({ recommendation: 'AVERAGE DOWN', rec_class: 'BUY-ISH', correct: false }),
+    ])
+    expect(md).toContain('| HOLD-ISH | 4 | 4 | 100% |')
+    expect(md).toContain('| SELL-ISH | 1 | 0 | 0% |')
+    expect(md).toContain('| BUY-ISH | 1 | 0 | 0% |')
+    expect(md).toContain('4/6 correct (67%)')
+  })
+
+  it('shows a dash rather than NaN for a class with no scored recs', () => {
+    const md = buildLedgerSection([], [accuracyRow({ rec_class: 'HOLD-ISH' })])
+    expect(md).toContain('| SELL-ISH | 0 | 0 | — |')
+    expect(md).not.toContain('NaN')
   })
 })
 

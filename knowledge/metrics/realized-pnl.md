@@ -2,7 +2,7 @@
 type: metric
 title: realized P&L
 description: Locked-in gain/loss from closed lots — stocks, gold, and funds — computed weighted-average on SELL.
-resource: supabase/migrations/020_fold_trade_fees.sql
+resource: db/migrations/020_fold_trade_fees.sql
 tags: [pnl, portfolio, metric, income]
 generated:
   by: human:marvellooni

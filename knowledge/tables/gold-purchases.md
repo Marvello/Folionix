@@ -2,8 +2,8 @@
 type: table
 title: gold_purchases
 description: Per-purchase gold holdings — venue, grams, buy price per gram, and purchase date.
-resource: supabase/schema.sql
-tags: [supabase, gold, source-of-truth]
+resource: db/schema.sql
+tags: [postgres, gold, source-of-truth]
 generated:
   by: human:marvellooni
   at: 2026-07-08T00:00:00Z

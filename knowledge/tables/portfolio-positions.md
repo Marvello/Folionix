@@ -2,8 +2,8 @@
 type: table
 title: portfolio_positions
 description: Derived cache of owned IDX positions — ticker, average buy price, lots, realized P&L, active flag, and notes, recomputed from stock_transactions.
-resource: supabase/schema.sql
-tags: [supabase, portfolio, derived-cache]
+resource: db/schema.sql
+tags: [postgres, portfolio, derived-cache]
 generated:
   by: human:marvellooni
   at: 2026-07-12T00:00:00Z

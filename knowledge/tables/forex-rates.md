@@ -2,8 +2,8 @@
 type: table
 title: forex_rates
 description: Daily FX-to-IDR exchange rates per currency pair, used to value foreign-currency fund holdings.
-resource: supabase/migrations/010_forex_rates.sql
-tags: [supabase, forex, price]
+resource: db/migrations/010_forex_rates.sql
+tags: [postgres, forex, price]
 generated:
   by: human:marvellooni
   at: 2026-07-12T00:00:00Z

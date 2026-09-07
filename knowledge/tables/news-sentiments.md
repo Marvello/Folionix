@@ -2,8 +2,8 @@
 type: table
 title: news_sentiments
 description: LLM-summarized news sentiment per ticker and analysis depth — score, themes, catalyst, and risk.
-resource: supabase/schema.sql
-tags: [supabase, news, sentiment, llm]
+resource: db/schema.sql
+tags: [postgres, news, sentiment, llm]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

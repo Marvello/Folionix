@@ -2,8 +2,8 @@
 type: dataset
 title: latest_fund_navs
 description: View exposing the single most-recent fund_snapshots row per fund.
-resource: supabase/migrations/005_funds_bonds.sql
-tags: [supabase, view, funds]
+resource: db/migrations/005_funds_bonds.sql
+tags: [postgres, view, funds]
 generated:
   by: human:marvellooni
   at: 2026-06-23T00:00:00Z

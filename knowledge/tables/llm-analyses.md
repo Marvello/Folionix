@@ -2,8 +2,8 @@
 type: table
 title: llm_analyses
 description: LLM analysis output per ticker — recommendation, raw and cleaned text, and Telegram send/skip flags, linked to the snapshot it analyzed.
-resource: supabase/schema.sql
-tags: [supabase, llm, ollama, recommendation]
+resource: db/schema.sql
+tags: [postgres, llm, ollama, recommendation]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

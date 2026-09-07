@@ -14,7 +14,7 @@ status: stable
 
 `db.load_portfolio` returns active positions as `{TICKER: {avg_price, lots,
 notes, active}}`. This is the in-memory dataset the pipelines iterate over;
-there is no `portfolio.json` — Supabase is the source of truth.
+there is no `portfolio.json` — Postgres is the source of truth.
 
 ## Related
 

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Indonesian stock portfolio (IDX) analyzer. Fetches market data via yahoo-finance2, runs LLM analysis via Vercel AI SDK (Ollama/LiteLLM), sends alerts to Telegram, stores everything in self-hosted Supabase, and provides a Next.js + Tailwind dashboard (`web/`). Node 24 + TypeScript backend (`app/`); Node 24 frontend (`web/`).
+Indonesian stock portfolio (IDX) analyzer. Fetches market data via yahoo-finance2, runs LLM analysis via Vercel AI SDK (Ollama/LiteLLM), sends alerts to Telegram, stores everything in self-hosted Postgres, and provides a Next.js + Tailwind dashboard (`web/`). Node 24 + TypeScript backend (`app/`); Node 24 frontend (`web/`).
 
 ## Project Structure
 
@@ -17,7 +17,7 @@ app/                        # Node 24 TypeScript backend (ESM, esbuild)
 ├── tsconfig.json           # NodeNext, strict, noEmit, includes ../lib/**/*
 ├── build.mjs               # esbuild bundle (bot, graph/runner, services/portfolio)
 └── src/
-    ├── db/db.ts            # Supabase data layer (@supabase/supabase-js / PostgREST)
+    ├── db/db.ts            # Postgres data layer (node-postgres pool over DATABASE_URL)
     ├── providers/
     │   ├── market.ts       # yahoo-finance2 stock fetch (price, fundamentals, P&L)
     │   ├── finnhub.ts      # Finnhub REST fallback provider
@@ -50,23 +50,24 @@ app/                        # Node 24 TypeScript backend (ESM, esbuild)
         ├── runner.ts       # Long-running entry point (SIGTERM-aware)
         └── worker.ts       # Deep-run queue worker (claims analysis_jobs, SIGTERM-aware)
 lib/                        # Shared TypeScript (imported by both app/ and web/)
-├── types.ts                # Supabase row interfaces (12 types)
+├── types.ts                # Postgres row interfaces (12 types)
 └── format.ts               # Utility functions (fmtIdr, calcPnl, normalizeTicker, …)
-supabase/                   # Supabase infra assets (SQL + key-gen tool; not imported at runtime)
-├── schema.sql              # tables + views + RPC + RLS
-├── migrations/             # incremental schema changes
-├── seed.sql                # static bootstrap snapshot (optional, hand-edited)
-└── gen_keys.py             # JWT anon/service key generator (CLI)
+db/                         # SQL assets for the Postgres DB (not imported at runtime)
+├── schema.sql              # consolidated snapshot = migrations 001–036; no RLS
+├── migrations/             # incremental changes, applied manually in order (037+)
+├── imports/                # one-off data-import SQL, gitignored (Stockbit history)
+└── seed.sql                # static bootstrap snapshot (optional, hand-edited)
 web/                        # Next.js + Tailwind frontend (App Router)
-├── app/                    # routes: / (dashboard), /portfolio, /watchlist, /news, /gold, /funds, /bonds, /login
+├── app/                    # routes: / (dashboard), /stocks, /news, /gold, /funds, /bonds, /reviews, /login,
+│                           #         /api/auth/[...nextauth], /api/weekly-reviews/latest
 ├── components/             # Nav, MetricCard, RecommendationBadge, *Client, TickerDetail
-├── lib/                    # format.ts, types.ts, supabase/{client,server}.ts
+├── lib/                    # format.ts, types.ts, db.ts (pg pool), auth.ts (NextAuth), env.ts
 └── proxy.ts                # Next 16 "proxy" (was middleware): auth/session gate
 docker/                     # Docker-related files
 ├── Dockerfile.app          # Node 24 multi-stage build (deps → builder → runner)
 ├── Dockerfile.web          # Next.js multi-stage build (build context: repo root)
-└── docker-compose.yml      # folionix-graph / folionix-bot / folionix-web (Supabase runs as a separate, un-vendored stack)
-data/                       # Runtime data (gitignored) — Supabase is the source of truth
+└── docker-compose.yml      # folionix-db (postgres:17-alpine) / -graph / -bot / -worker / -web
+data/                       # Runtime data (gitignored) — Postgres is the source of truth
 ```
 
 ## Knowledge bundle
@@ -117,15 +118,15 @@ cd app && npm run build
 
 ## Docker
 
-Services in `docker/docker-compose.yml`: `folionix-graph` (LangGraph orchestrator), `folionix-bot` (Telegram), `folionix-worker` (multi-agent analysis-job worker), `folionix-web` (Next.js on 3000). Self-hosted Supabase runs as its **own separate stack — not vendored into this repo** (bootstrap it locally per `knowledge/runbooks/supabase-foundation.md`; treat `docker/supabase/` as throwaway local infra, never commit it). All share `.env`.
+Services in `docker/docker-compose.yml`: `folionix-db` (`postgres:17-alpine`, `pgdata` volume), `folionix-graph` (LangGraph orchestrator), `folionix-bot` (Telegram), `folionix-worker` (multi-agent analysis-job worker), `folionix-web` (Next.js on 3000). Postgres is vendored into this compose file — bootstrap it per `knowledge/runbooks/postgres-foundation.md`. All share `.env`.
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
 docker compose -f docker/docker-compose.yml logs -f folionix-graph
 ```
 
-`folionix-bot`/`folionix-graph` reach host Ollama via `extra_hosts: ollama-host:host-gateway`. The self-hosted Supabase stack runs separately and is not part of this repo. Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-compose.yml up -d` (CI pushes sha-tagged images alongside `:latest`; default is `latest`).
-CI/CD: GitHub Actions (`.github/workflows/build.yml`) builds/pushes two multi-arch (`linux/amd64`, `linux/arm64`) images to Docker Hub, gated on tsc + vitest + web build: the Node image `marvellooni/folionix-app` (from `docker/Dockerfile.app`, build context: repo root) and the Next.js web image `marvellooni/folionix-web` (from `docker/Dockerfile.web`; `NEXT_PUBLIC_*` are read at runtime via `window.__ENV` injection, not baked at build). Each arch builds natively (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm` — no QEMU) with `type=gha` layer caching, pushes by digest, and a `merge` job assembles the multi-arch `:latest` + `:<sha8>` manifests. `docker/Dockerfile.app` installs deps from `app/package*.json` in their own layer (`npm ci --omit=dev`), then copies `app/` + `lib/` and runs `node build.mjs` — keep dependency edits in `app/package.json` and don't reorder those steps.
+`folionix-bot`/`folionix-graph` reach host Ollama via `extra_hosts: ollama-host:host-gateway`. Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-compose.yml up -d` (CI pushes sha-tagged images alongside `:latest`; default is `latest`).
+CI/CD: GitHub Actions (`.github/workflows/build.yml`) builds/pushes two multi-arch (`linux/amd64`, `linux/arm64`) images to Docker Hub, gated on tsc + vitest + web build: the Node image `marvellooni/folionix-app` (from `docker/Dockerfile.app`, build context: repo root) and the Next.js web image `marvellooni/folionix-web` (from `docker/Dockerfile.web`; `NEXT_PUBLIC_*` are read at runtime via `window.__ENV` injection, not baked at build). Each arch builds natively (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm` — no QEMU) with `type=gha` layer caching, pushes by digest, and a `merge` job assembles the multi-arch `:latest` + `:<sha8>` manifests. `docker/Dockerfile.app` installs deps in their own layer from the root `package.json` + `package-lock.json` plus `app/package.json` (`npm ci --omit=dev -w app` — this is an npm workspace monorepo; the root lockfile is the only one), then copies `app/` + `lib/` and runs `node build.mjs` — keep dependency edits in `app/package.json` and don't reorder those steps.
 
 ## Architecture
 
@@ -138,10 +139,10 @@ app/src/services/bonds.ts      →  par value (no provider; principal entered ma
 app/src/services/weekReview.ts →  weekly review (lib/aggregate WoW + rec ledger + LLM self-critique) → weekly_reviews + email + Telegram
 app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue → persona LLM calls → consensus → llm_analyses + Telegram)
        ↓ (saves)
-     app/src/db/db.ts  ←→  Supabase (PostgREST) via @supabase/supabase-js
+     app/src/db/db.ts  ←→  Postgres (node-postgres pool, raw SQL) via DATABASE_URL
        ↑ (reads)
      app/src/bot/bot.ts  ←→  Telegram commands (grammy; /status, /add, /update, /remove, /analyze, /wadd, /wremove, /wlist, /gadd, /glist, /gremove, /gprice, /flist, /blist, /weekreview)
-     web/               ←→  Next.js dashboard reads/writes Supabase directly (supabase-js + RLS)
+     web/               ←→  Next.js dashboard reads/writes Postgres directly (its own pg pool)
 ```
 
 - **app/src/services/portfolio.ts**: Portfolio pipeline entry (`runPortfolioPipeline`), watchlist pipeline (`runWatchlistPipeline`), price-only refresh (`runPriceRefresh`). Fans out per ticker through providers/market → ai/llm → sends Telegram alerts via telegram/client.
@@ -149,9 +150,9 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 - **app/src/ai/llm.ts**: Vercel AI SDK (`generateText`) primary/fallback chain. Backend via `LLM_BACKEND` (`ollama` → `createOllama` | `litellm` → `@ai-sdk/openai` compat). Exports `callLlm`, `extractRecommendation`, `cleanForTelegram`.
 - **app/src/ai/prompts.ts**: `buildPrompt` — portfolio-analysis prompt builder (`depth`: LIGHT/FULL/DEEP), WIB session context via `detectSession()`. Output template ends with a mandatory `REKOMENDASI: <keyword>` line (what `extractRecommendation` reads). Held positions get action sizing vs the Rp 1jt threshold; watchlist tickers get a pure entry signal (BUY/MONITOR/HOLD) with no threshold. Optional TECHNICALS block from **app/src/ai/indicators.ts** (SMA20/50, RSI14, 1W momentum, volume vs 20d avg, IHSG relative strength — all computed from our own `stock_snapshots` history, no external provider).
 - **app/src/providers/finnhub.ts**: Best-effort Finnhub REST fallback; disabled when `FINNHUB_API_KEY` unset. Caveat: USD prices, not IDR.
-- **app/src/db/db.ts**: Supabase data layer via `@supabase/supabase-js` (PostgREST). Tables: `stock_snapshots`, `llm_analyses`, `news_cache`, `news_sentiments`, `stock_transactions`, `portfolio_positions`, `stock_dividends`, `watchlist`, `gold_purchases`, `gold_snapshots`, `fund_catalog`, `fund_snapshots`, `fund_purchases`, `fund_distributions`, `bond_holdings`, `weekly_reviews`, `analysis_jobs`, `persona_analyses`; views `latest_snapshots`/`latest_analyses`/`latest_gold_prices`/`latest_fund_navs`/`fund_product_summary`; RPC `recommendation_accuracy`, `claim_analysis_job` (atomic `FOR UPDATE SKIP LOCKED` job claim). Stocks are now transaction-backed: `stock_transactions` is the source of truth (BUY/SELL ledger); `portfolio_positions` (avg_price, lots, `realized_pnl`) is a derived cache recomputed by a Postgres trigger on every `stock_transactions` write. `gold_purchases`/`fund_purchases` carry a `side` (BUY default | SELL); holdings are netted buys − sells.
+- **app/src/db/db.ts**: Postgres data layer — a `node-postgres` pool over `DATABASE_URL`, raw parameterised SQL through a local `q()` helper. Date/timestamp OIDs (1082/1114/1184) are parsed as ISO strings so callers can `.slice()` and compare them. Tables: `stock_snapshots`, `llm_analyses`, `news_cache`, `news_sentiments`, `stock_transactions`, `portfolio_positions`, `stock_dividends`, `watchlist`, `gold_purchases`, `gold_snapshots`, `fund_catalog`, `fund_snapshots`, `fund_purchases`, `fund_distributions`, `bond_holdings`, `weekly_reviews`, `analysis_jobs`, `persona_analyses`; views `latest_snapshots`/`latest_analyses`/`latest_gold_prices`/`latest_fund_navs`/`fund_product_summary`; RPC `recommendation_accuracy`, `claim_analysis_job` (atomic `FOR UPDATE SKIP LOCKED` job claim). Stocks are now transaction-backed: `stock_transactions` is the source of truth (BUY/SELL ledger); `portfolio_positions` (avg_price, lots, `realized_pnl`) is a derived cache recomputed by a Postgres trigger on every `stock_transactions` write. `gold_purchases`/`fund_purchases` carry a `side` (BUY default | SELL); holdings are netted buys − sells.
 - **app/src/bot/bot.ts**: grammy Telegram bot with chat ID whitelisting. All 16 commands. `/add`/`/wadd` call `runPriceRefresh` after adding.
-- **web/**: Next.js + Tailwind dashboard (App Router). Pages: Dashboard, Portfolio (+CRUD), Watchlist (+CRUD), News, Gold (+CRUD, holdings valued at venue sell-back price), Funds (+CRUD, add via `fund_catalog` autocomplete search, holdings valued at latest NAV), Bonds (+CRUD, valued at par/principal), Reviews (read-only weekly-review reports rendered from markdown, with copy-to-clipboard handover doc). Reads/writes Supabase directly via `supabase-js` under Supabase Auth + RLS. Login is email + password via Supabase Auth (`signInWithPassword`); there is no public sign-up.
+- **web/**: Next.js + Tailwind dashboard (App Router). Pages: Dashboard, Portfolio (+CRUD), Watchlist (+CRUD), News, Gold (+CRUD, holdings valued at venue sell-back price), Funds (+CRUD, add via `fund_catalog` autocomplete search, holdings valued at latest NAV), Bonds (+CRUD, valued at par/principal), Reviews (read-only weekly-review reports rendered from markdown, with copy-to-clipboard handover doc). Reads/writes Postgres directly through its own `pg` pool (`web/lib/db.ts`); there is no backend API in the path. Login is email + password via NextAuth Credentials + bcrypt against `public.users` (`web/lib/auth.ts`, JWT sessions), gated by `web/proxy.ts`; there is no public sign-up.
 - **app/src/services/watchlist.ts**: `loadWatchlist`, `addToWatchlist`, `removeFromWatchlist`; splits user vs ai_suggested rows.
 - **lib/format.ts**: Shared helpers (fmtIdr, fmtCap, calcPnl, pnlIcon, normalizeTicker, valueHolding, sanitizeHtml, WIB).
 - **app/src/graph/**: LangGraph orchestrator (`@langchain/langgraph`). Outer orchestrator (session detection → price refresh → signal check → routing) and inner analysis graph (delegates to portfolio pipeline). Runs as long-running process with SIGTERM handling. Signal-aware, market-session-aware monitoring (ACTIVE_INTERVAL during market hours, IDLE_INTERVAL otherwise).
@@ -164,8 +165,8 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 
 ## Key Configuration
 
-- **Supabase**: source of truth for positions (`portfolio_positions`) and watchlist (`watchlist`, kind = user | ai_suggested). Managed via the bot (`/add`, `/wadd`, …) and web UI. 1 lot = 100 shares. `supabase/seed.sql` is an optional static bootstrap.
-- **.env**: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (backend), `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (web), `LLM_BACKEND`, `LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`, `LLM_NUM_PREDICT` (max output tokens; context window is server-side — `OLLAMA_CONTEXT_LENGTH`/Modelfile, not an app var), plus optional fallback `LLM_FALLBACK_BACKEND`/`LLM_FALLBACK_MODEL`/`LLM_FALLBACK_API_BASE`/`LLM_FALLBACK_API_KEY` (each defaults to the primary's value) (legacy `OLLAMA_URL`/`OLLAMA_MODEL`/`OLLAMA_NUM_PREDICT` still read as fallbacks), `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `CACHE_MINUTES`, `ACTION_THRESHOLD_IDR`, `SEND_TELEGRAM`, `SIGNAL_PRICE_MINOR`, `SIGNAL_PRICE_MAJOR`, `SIGNAL_VOLUME_MINOR`, `SIGNAL_VOLUME_MAJOR`, `SIGNAL_COOLDOWN_MIN`, `GRAPH_ACTIVE_INTERVAL`/`GRAPH_IDLE_INTERVAL` (runner loop sleep, in minutes), `GRAPH_ANALYSIS_INTERVAL` (scheduled analysis cadence, minutes, default 30), `GOLD_REFRESH_HOURS` (gold price refresh cadence, hours, default 3 — independent of the daily 17:00 WIB fund NAV sweep), `GRAPH_SEND_TELEGRAM`, `REC_STABILITY_PCT` (skip re-analysis if same WIB day and price moved less than this %, default 2), `FINNHUB_API_KEY` (optional fallback), `FINNHUB_BASE_URL`, `CERMATI_GRAPHQL_URL` (Cermati gold-price GraphQL endpoint), `CERMATI_COOKIE` (optional fallback auth), `CERMATI_MF_URL` (optional; Cermati mutual-fund products REST endpoint, defaults to `https://invest.cermati.com/api/v2/mutual-funds/products`), `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`EMAIL_FROM`/`EMAIL_TO` (weekly-review email via Brevo SMTP; alternates `SMTP_SERVER`/`SMTP_USERNAME`/`SMPT_USERNAME`/`SMTP_PASSWORD` also read; email skipped when unset), `DEEP_RUNS_ENABLED` (default false — MAJOR signals enqueue multi-agent deep runs instead of the inline single pass), `PERSONAS` (enabled investor personas — comma list of names or a number = first N, default all 12), `WORKER_POLL_SEC` (worker idle poll, default 10), `WORKER_MAX_ATTEMPTS` (job retries, default 3), `CONSENSUS_MIN_PERSONAS` (default half of enabled), `DEEP_RUN_STALE_MIN` (requeue stuck running jobs on worker start, default 120)
+- **Postgres**: source of truth for positions (`portfolio_positions`) and watchlist (`watchlist`, kind = user | ai_suggested). Managed via the bot (`/add`, `/wadd`, …) and web UI. 1 lot = 100 shares. `db/seed.sql` is an optional static bootstrap. The DB runs as the `folionix-db` compose service (`postgres:17-alpine`, `pgdata` volume); the backend connects as the DB owner.
+- **.env**: `DATABASE_URL` (Postgres connection string — read by both `app/` and `web/`; there are no separate backend/frontend DB creds), `AUTH_SECRET` + `AUTH_URL` (NextAuth), `FOLIONIX_WEB_URL` + `AIREVIEW_API_TOKEN` (the `/aireview` local command curls the deployed web app because the DB is not reachable from a dev machine), `NEWS_CACHE_HOURS`, `NEWS_FETCH_ENABLED`, `LLM_BACKEND`, `LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`, `LLM_NUM_PREDICT` (max output tokens; context window is server-side — `OLLAMA_CONTEXT_LENGTH`/Modelfile, not an app var), plus optional fallback `LLM_FALLBACK_BACKEND`/`LLM_FALLBACK_MODEL`/`LLM_FALLBACK_API_BASE`/`LLM_FALLBACK_API_KEY` (each defaults to the primary's value) (legacy `OLLAMA_URL`/`OLLAMA_MODEL`/`OLLAMA_NUM_PREDICT` still read as fallbacks), `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `CACHE_MINUTES`, `ACTION_THRESHOLD_IDR`, `SEND_TELEGRAM`, `SIGNAL_PRICE_MINOR`, `SIGNAL_PRICE_MAJOR`, `SIGNAL_VOLUME_MINOR`, `SIGNAL_VOLUME_MAJOR`, `SIGNAL_COOLDOWN_MIN`, `GRAPH_ACTIVE_INTERVAL`/`GRAPH_IDLE_INTERVAL` (runner loop sleep, in minutes), `GRAPH_ANALYSIS_INTERVAL` (scheduled analysis cadence, minutes, default 30), `GOLD_REFRESH_HOURS` (gold price refresh cadence, hours, default 3 — independent of the daily 17:00 WIB fund NAV sweep), `GRAPH_SEND_TELEGRAM`, `REC_STABILITY_PCT` (skip re-analysis while price has moved less than this % since the price the last recommendation was made at, default 2), `REC_MAX_AGE_HOURS` (force a refresh once the last call is older than this even if price never moved, default 72), `FINNHUB_API_KEY` (optional fallback), `FINNHUB_BASE_URL`, `CERMATI_GRAPHQL_URL` (Cermati gold-price GraphQL endpoint), `CERMATI_COOKIE` (optional fallback auth), `CERMATI_MF_URL` (optional; Cermati mutual-fund products REST endpoint, defaults to `https://invest.cermati.com/api/v2/mutual-funds/products`), `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`EMAIL_FROM`/`EMAIL_TO` (weekly-review email via Brevo SMTP; alternates `SMTP_SERVER`/`SMTP_USERNAME`/`SMPT_USERNAME`/`SMTP_PASSWORD` also read; email skipped when unset), `DEEP_RUNS_ENABLED` (default false — MAJOR signals enqueue multi-agent deep runs instead of the inline single pass), `PERSONAS` (enabled investor personas — comma list of names or a number = first N, default all 12), `WORKER_POLL_SEC` (worker idle poll, default 10), `WORKER_MAX_ATTEMPTS` (job retries, default 3), `CONSENSUS_MIN_PERSONAS` (default half of enabled), `DEEP_RUN_STALE_MIN` (requeue stuck running jobs on worker start, default 120)
 - Tickers are stored everywhere as the yahoo symbol (`BBCA.JK`, `^JKSE` for IHSG) via `normalizeTicker` — snapshots, analyses, positions, transactions, watchlist, news, dividends (migration `024_ticker_yahoo_symbol.sql`; future-proofs non-IDX markets). UI/Telegram strip the suffix for display via `displayTicker`; URLs carry the plain code
 - All timestamps stored UTC, displayed in WIB (Asia/Jakarta, UTC+7)
 - All local TypeScript imports use `.js` extension (NodeNext ESM)
@@ -177,17 +178,17 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 - All code, comments, prompts, and user-facing strings in English (the Google News search query keeps the Indonesian term `saham` to fetch local-market news)
 - Telegram messages use HTML formatting, not Markdown
 - P&L status emoji: 🟢 PROFIT, ⚪ BREAKEVEN, 🟡 SMALL LOSS, 🔴 LOSS
-- All persistent data lives in Supabase (no local JSON/SQLite source of truth)
+- All persistent data lives in Postgres (no local JSON/SQLite source of truth)
 - Web CRUD (every add/edit) opens a centered modal dialog via `web/components/Modal.tsx`, never an inline form between rows (see `knowledge/design.md` → Components → Dialogs)
-- Migrations are tracked in `public.schema_migrations` (version, name, applied_at). Every new file in `supabase/migrations/` **must end** with `insert into public.schema_migrations (version, name) values ('NNN', 'NNN_name') on conflict do nothing;` so `select version from public.schema_migrations order by version` reflects what's live. Migrations are applied manually (psql / Supabase SQL editor), in numeric order; there is no runner.
+- Migrations are tracked in `public.schema_migrations` (version, name, applied_at). Every new file in `db/migrations/` **must end** with `insert into public.schema_migrations (version, name) values ('NNN', 'NNN_name') on conflict do nothing;` so `select version from public.schema_migrations order by version` reflects what's live. Migrations are applied manually (`psql "$DATABASE_URL" -f ...`), in numeric order; there is no runner. `db/schema.sql` is the consolidated snapshot of `001`–`036` and registers all of them, so a fresh bootstrap applies `schema.sql` then `037`+ only — **never replay `003`–`033`**, which predate `035_drop_rls` and still use Supabase-only `to authenticated` / `auth.role()` / `revoke ... from anon` that abort on plain Postgres.
 
 ## Security
 
 - Docker runs as non-root (`appuser`)
 - Never expose internal errors/stack traces to users — log internally, show generic message
 - All ticker inputs validated with regex `^[A-Z0-9]{1,10}$`
-- Supabase RLS: anon denied; authenticated reads all + writes portfolio/watchlist; service role (backend) bypasses RLS
-- Secrets via `.env` only, never hardcoded; `SUPABASE_SERVICE_KEY` is backend-only, never in the frontend
+- No RLS (dropped in migration 035). Auth is enforced by NextAuth + `web/proxy.ts`; both app and web connect as the DB owner, so any DB access is full access — keep `DATABASE_URL` off the client
+- Secrets via `.env` only, never hardcoded; `DATABASE_URL` and `AUTH_SECRET` are server-side only — never expose them via `NEXT_PUBLIC_*`
 
 ## graphify
 

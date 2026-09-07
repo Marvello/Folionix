@@ -2,8 +2,8 @@
 type: table
 title: stock_dividends
 description: Dividend income received per stock ticker.
-resource: supabase/migrations/016_stock_dividends.sql
-tags: [supabase, portfolio, income]
+resource: db/migrations/016_stock_dividends.sql
+tags: [postgres, portfolio, income]
 generated:
   by: human:marvellooni
   at: 2026-07-08T00:00:00Z

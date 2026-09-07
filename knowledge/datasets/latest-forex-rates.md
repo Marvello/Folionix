@@ -2,8 +2,8 @@
 type: dataset
 title: latest_forex_rates
 description: Newest exchange rate per currency pair — one row per (base, quote).
-resource: supabase/migrations/010_forex_rates.sql
-tags: [supabase, view, forex]
+resource: db/migrations/010_forex_rates.sql
+tags: [postgres, view, forex]
 generated:
   by: human:marvellooni
   at: 2026-07-12T00:00:00Z

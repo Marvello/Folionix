@@ -2,8 +2,8 @@
 type: dataset
 title: latest_snapshots
 description: View exposing the single most-recent stock_snapshots row per ticker.
-resource: supabase/schema.sql
-tags: [supabase, view, market-data]
+resource: db/schema.sql
+tags: [postgres, view, market-data]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

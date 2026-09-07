@@ -255,11 +255,15 @@ export interface WeeklyReviewRow {
 export interface RecommendationAccuracyRow {
   ticker: string
   recommendation: string
+  /** BUY-ISH | SELL-ISH | HOLD-ISH — null for an unmapped keyword. */
+  rec_class: string | null
   analysed_at: string | null
   price_at_rec: number | null
   price_after: number | null
   days_after: number
   actual_change_pct: number | null
+  /** IHSG move over the same window; null when no ^JKSE snapshot brackets it. */
+  benchmark_change_pct: number | null
   correct: boolean | null
 }
 

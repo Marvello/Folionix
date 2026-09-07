@@ -2,8 +2,8 @@
 type: table
 title: watchlist
 description: Tickers to watch but not (yet) owned — user-added or AI-suggested, with sector and rationale.
-resource: supabase/schema.sql
-tags: [supabase, watchlist]
+resource: db/schema.sql
+tags: [postgres, watchlist]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

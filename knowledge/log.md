@@ -8,6 +8,38 @@ description: Dated record of OKF concept drift fixes and sync passes.
 Append-only. Newest entries first. Each entry records what drifted in the
 codebase and which concept(s) were updated to match.
 
+## 2026-09-07 — Supabase → Postgres doc sync + accuracy metric rewrite
+
+- **Concept drift, long-standing.** Migrations `035_drop_rls` and
+  `036_nextauth_tables` moved Folionix off self-hosted Supabase to plain
+  Postgres + NextAuth, but the docs never followed. `CLAUDE.md` still described
+  `@supabase/supabase-js` / PostgREST, `SUPABASE_*` env vars, an RLS model, and
+  a separately-deployed Supabase stack; `README.md` and this bundle agreed with
+  it. Reality: `node-postgres` pools over `DATABASE_URL` in both `app/src/db/db.ts`
+  and `web/lib/db.ts`, raw SQL, no RLS, `folionix-db` (`postgres:17-alpine`)
+  vendored in `docker/docker-compose.yml`.
+- **Caught by cost.** The stale docs led to a migration draft ending in
+  `revoke execute ... from public, anon` — `anon` no longer exists, so it would
+  have aborted on apply. Migration `035` guards its own revokes with a
+  `pg_roles` existence check for exactly this reason.
+- Updated: `CLAUDE.md`, `README.md`, `index.md`, `tables/index.md`,
+  `decisions.md`, `datasets/active-portfolio.md`, `pipelines/week-review.md`,
+  and the `supabase` → `postgres` frontmatter tag on 27 concept files.
+  `resource:` paths still read `db/...` — that directory name is
+  historical and still correct on disk.
+- **Renamed** `runbooks/supabase-foundation.md` → `runbooks/postgres-foundation.md`,
+  rewritten for the real bootstrap (compose service, `psql -f`, NextAuth user
+  creation) with an explicit warning against reintroducing Supabase role grants.
+  `db/gen_keys.py` is now dead code and marked as such.
+- **`metrics/recommendation-accuracy.md` rewritten** for migration
+  `037_accuracy_benchmark_relative`: HOLD-ish recommendations now score against
+  `^JKSE` (correct when the ticker tracked the index within `hold_band_pct`,
+  default 1.5) instead of an absolute `|move| < 5%` band, and rows carry
+  `rec_class` + `benchmark_change_pct`. The old band was near-free at IDX
+  volatility — 86% of one week's sample was HOLD-ish scoring 92%, against 33%
+  on the six actionable calls, so the blended figure tracked market calm rather
+  than skill.
+
 ## 2026-07-29 — OKF v0.1 → v0.2 migration
 
 - **Breaking**: `timestamp` field replaced with `generated: { by, at }` block
@@ -108,7 +140,7 @@ plus two concepts the 07-08 pass missed (`forex_rates`, fund `currency`).
   updated to show netted holdings + realized (still read-only for these
   domains — no new bot commands for the ledger, dividends, or distributions).
 - **Verified in sync:** 16 tables, 6 views, and the `recommendation_accuracy`
-  RPC in `supabase/schema.sql` (`claim_pending_refresh` lives in migration
+  RPC in `db/schema.sql` (`claim_pending_refresh` lives in migration
   003, not yet folded into `schema.sql`) + migrations 001–018 all match
   their documented concepts.
 - **Post-merge re-verification (same day):** three follow-up commits audited
@@ -127,7 +159,7 @@ plus two concepts the 07-08 pass missed (`forex_rates`, fund `currency`).
   universe), [fund_snapshots](tables/fund-snapshots.md) (NAV history),
   [fund_purchases](tables/fund-purchases.md) (holdings, source of truth),
   [bond_holdings](tables/bond-holdings.md) (holdings, source of truth —
-  no separate price table). Added by `supabase_local/migrations/005_funds_bonds.sql`.
+  no separate price table). Added by `db/migrations/005_funds_bonds.sql`.
 - **New view**: [latest_fund_navs](datasets/latest-fund-navs.md) — newest
   `fund_snapshots` row per fund, mirrors `latest_gold_prices`.
 - **New pipelines**: [fund NAVs](pipelines/fund-navs.md)
@@ -142,7 +174,7 @@ plus two concepts the 07-08 pass missed (`forex_rates`, fund `currency`).
   Both are **web-only for writes**; the bot's `/flist`/`/blist` are
   read-only (no `/fadd`/`/badd`), unlike gold's full `/gadd`/`/gremove`.
 - **Verified in sync:** 13 tables, 5 views, and the `recommendation_accuracy`
-  RPC in `supabase_local/schema.sql` + migrations 001–005 all match their
+  RPC in `db/schema.sql` + migrations 001–005 all match their
   documented concepts.
 
 ## 2026-06-22 — sync pass
@@ -160,5 +192,5 @@ plus two concepts the 07-08 pass missed (`forex_rates`, fund `currency`).
   (brand component spec + currency rule) and `CLAUDE.md` (conventions), not in
   the tables/datasets/metrics/pipelines concepts.
 - **Verified in sync:** 9 tables, 4 views, and the `recommendation_accuracy`
-  RPC in `supabase_local/schema.sql` (+ migrations 001–004) all match their
+  RPC in `db/schema.sql` (+ migrations 001–004) all match their
   documented concepts. No table/view/RPC added, removed, or renamed.

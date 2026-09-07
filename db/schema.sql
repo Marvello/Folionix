@@ -528,17 +528,24 @@ select
 from public.news_cache n
 left join latest_sent s on s.ticker = n.ticker;
 
--- ── rpc: recommendation_accuracy(days_after int) ──
-create or replace function public.recommendation_accuracy(days_after integer default 3)
+-- ── rpc: recommendation_accuracy(days_after int, hold_band_pct float) ──
+-- HOLD-ish calls score against IHSG (^JKSE), not an absolute band — see
+-- migrations/037_accuracy_benchmark_relative.sql for the reasoning.
+create or replace function public.recommendation_accuracy(
+    days_after     integer default 3,
+    hold_band_pct  double precision default 1.5
+)
 returns table (
-    ticker             varchar,
-    recommendation     varchar,
-    analysed_at        timestamptz,
-    price_at_rec       double precision,
-    price_after        double precision,
-    days_after         integer,
-    actual_change_pct  double precision,
-    correct            boolean
+    ticker               varchar,
+    recommendation       varchar,
+    rec_class            text,
+    analysed_at          timestamptz,
+    price_at_rec         double precision,
+    price_after          double precision,
+    days_after           integer,
+    actual_change_pct    double precision,
+    benchmark_change_pct double precision,
+    correct              boolean
 )
 language sql
 stable
@@ -546,8 +553,6 @@ set search_path = public
 as $$
 with daily as (
     -- last non-empty recommendation per ticker per WIB calendar day
-    -- (025_accuracy_daily_dedupe: cycle-level scoring overweighted the
-    -- most-analyzed tickers)
     select distinct on (a.ticker, (a.analysed_at at time zone 'Asia/Jakarta')::date)
            a.ticker, a.recommendation, a.analysed_at
     from public.llm_analyses a
@@ -560,6 +565,7 @@ with daily as (
 recent as (
     select ticker, recommendation, analysed_at
     from daily
+    where ticker <> '^JKSE'   -- the benchmark does not grade itself
     order by analysed_at desc
     limit 100
 ),
@@ -581,32 +587,63 @@ priced as (
             and s.fetched_at >= r.analysed_at + make_interval(days => days_after)
             and s.current_price is not null
           order by s.fetched_at asc
-          limit 1) as price_after
+          limit 1) as price_after,
+        (select s.current_price
+           from public.stock_snapshots s
+          where s.ticker = '^JKSE'
+            and s.fetched_at <= r.analysed_at
+            and s.current_price is not null
+          order by s.fetched_at desc
+          limit 1) as bench_at_rec,
+        (select s.current_price
+           from public.stock_snapshots s
+          where s.ticker = '^JKSE'
+            and s.fetched_at >= r.analysed_at + make_interval(days => days_after)
+            and s.current_price is not null
+          order by s.fetched_at asc
+          limit 1) as bench_after
     from recent r
+),
+classified as (
+    select
+        p.*,
+        case
+            when p.recommendation in ('BUY','BUY SEKARANG','BELI','AVERAGE DOWN') then 'BUY-ISH'
+            when p.recommendation in ('CUT LOSS','JUAL','TRIM','TAKE PROFIT')     then 'SELL-ISH'
+            when p.recommendation in ('HOLD','TUNGGU','MONITOR')                  then 'HOLD-ISH'
+        end as rec_class,
+        ((p.price_after - p.price_at_rec) / p.price_at_rec) * 100 as move_pct,
+        case
+            when p.bench_at_rec is not null and p.bench_at_rec <> 0
+                 and p.bench_after is not null
+            then ((p.bench_after - p.bench_at_rec) / p.bench_at_rec) * 100
+        end as bench_pct
+    from priced p
+    where p.price_at_rec is not null
+      and p.price_at_rec <> 0
+      and p.price_after is not null
+      and p.price_after <> 0
 )
 select
-    p.ticker,
-    p.recommendation,
-    p.analysed_at,
-    p.price_at_rec,
-    p.price_after,
+    c.ticker,
+    c.recommendation,
+    c.rec_class,
+    c.analysed_at,
+    c.price_at_rec,
+    c.price_after,
     days_after as days_after,
-    round((((p.price_after - p.price_at_rec) / p.price_at_rec) * 100)::numeric, 2)::double precision
-        as actual_change_pct,
-    case
-        when p.recommendation in ('BUY','BUY SEKARANG','BELI','AVERAGE DOWN')
-            then ((p.price_after - p.price_at_rec) / p.price_at_rec) * 100 > 0
-        when p.recommendation in ('CUT LOSS','JUAL','TRIM','TAKE PROFIT')
-            then ((p.price_after - p.price_at_rec) / p.price_at_rec) * 100 < 0
-        when p.recommendation in ('HOLD','TUNGGU','MONITOR')
-            then abs(((p.price_after - p.price_at_rec) / p.price_at_rec) * 100) < 5
-        else null
+    round(c.move_pct::numeric, 2)::double precision  as actual_change_pct,
+    round(c.bench_pct::numeric, 2)::double precision as benchmark_change_pct,
+    case c.rec_class
+        when 'BUY-ISH'  then c.move_pct > 0
+        when 'SELL-ISH' then c.move_pct < 0
+        when 'HOLD-ISH' then
+            case
+                when c.bench_pct is not null then abs(c.move_pct - c.bench_pct) < hold_band_pct
+                else abs(c.move_pct) < 5   -- no benchmark bracketing the window
+            end
     end as correct
-from priced p
-where p.price_at_rec is not null
-  and p.price_at_rec <> 0
-  and p.price_after is not null
-  and p.price_after <> 0;
+from classified c;
 $$;
 
 -- Manual price-refresh signal: web inserts a row, the graph drains it on its
@@ -752,4 +789,49 @@ create table if not exists public.verification_token (
   primary key (identifier, token)
 );
 
-insert into public.schema_migrations (version, name) values ('036', '036_nextauth_tables') on conflict do nothing;
+-- ── migration ledger ──
+-- This file IS the consolidated result of migrations 001–036, so it registers
+-- all of them. Only 037+ should be applied on top of a fresh bootstrap.
+--
+-- Do NOT replay 001–036 against a fresh database: migrations 003–033 predate
+-- migration 035 and still contain Supabase-only constructs (`to authenticated`,
+-- `auth.role()`, `revoke ... from anon`) that abort on plain Postgres, where
+-- those roles and the `auth` schema do not exist. They are kept as history.
+insert into public.schema_migrations (version, name) values
+    ('001', '001_watchlist_ai_fields'),
+    ('002', '002_latest_analyses_view'),
+    ('003', '003_price_refresh_requests'),
+    ('004', '004_gold'),
+    ('005', '005_funds_bonds'),
+    ('006', '006_security_invoker_views'),
+    ('007', '007_fund_nav_ordering'),
+    ('008', '008_bond_purchase_price'),
+    ('009', '009_fund_currency'),
+    ('010', '010_forex_rates'),
+    ('011', '011_bond_coupon_payments'),
+    ('012', '012_bond_coupon_schedule'),
+    ('013', '013_product_summary_views'),
+    ('014', '014_refresh_requests_kind'),
+    ('015', '015_stock_transactions'),
+    ('016', '016_stock_dividends'),
+    ('017', '017_gold_fund_side'),
+    ('018', '018_fund_distributions'),
+    ('019', '019_account_charges'),
+    ('020', '020_fold_trade_fees'),
+    ('021', '021_schema_migrations'),
+    ('022', '022_dividend_schedule'),
+    ('023', '023_weekly_reviews'),
+    ('024', '024_ticker_yahoo_symbol'),
+    ('025', '025_accuracy_daily_dedupe'),
+    ('026', '026_analysis_jobs'),
+    ('027', '027_revoke_rpc_execute'),
+    ('028', '028_one_active_run_per_ticker'),
+    ('029', '029_fund_metrics'),
+    ('030', '030_fund_holdings'),
+    ('031', '031_fund_nav_view_metrics'),
+    ('032', '032_security_lint_fixes'),
+    ('033', '033_trigger_security_definer'),
+    ('034', '034_add_missing_indexes'),
+    ('035', '035_drop_rls'),
+    ('036', '036_nextauth_tables')
+on conflict do nothing;

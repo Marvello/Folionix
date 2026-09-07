@@ -2,8 +2,8 @@
 type: table
 title: gold_snapshots
 description: Per-venue gold price history — buy/sell/mid price per gram at a point in time.
-resource: supabase/schema.sql
-tags: [supabase, gold, snapshot]
+resource: db/schema.sql
+tags: [postgres, gold, snapshot]
 generated:
   by: human:marvellooni
   at: 2026-06-19T00:00:00Z

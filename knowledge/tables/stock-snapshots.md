@@ -2,8 +2,8 @@
 type: table
 title: stock_snapshots
 description: Per-ticker market snapshot — price, day change, 52-week range, fundamentals, and position P&L at a point in time.
-resource: supabase/schema.sql
-tags: [supabase, market-data, snapshot, idx]
+resource: db/schema.sql
+tags: [postgres, market-data, snapshot, idx]
 generated:
   by: human:marvellooni
   at: 2026-06-22T00:00:00Z

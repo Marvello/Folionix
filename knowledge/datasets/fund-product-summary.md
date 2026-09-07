@@ -2,8 +2,8 @@
 type: dataset
 title: fund_product_summary
 description: Per-fund aggregate of fund_purchases — net units, avg buy NAV, current value, unrealized and realized P&L.
-resource: supabase/migrations/017_gold_fund_side.sql
-tags: [supabase, view, funds]
+resource: db/migrations/017_gold_fund_side.sql
+tags: [postgres, view, funds]
 generated:
   by: human:marvellooni
   at: 2026-07-08T00:00:00Z

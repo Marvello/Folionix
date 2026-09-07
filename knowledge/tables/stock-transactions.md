@@ -2,8 +2,8 @@
 type: table
 title: stock_transactions
 description: Append-only ledger of stock BUY/SELL fills — now the source of truth for stock positions.
-resource: supabase/migrations/015_stock_transactions.sql
-tags: [supabase, portfolio, source-of-truth]
+resource: db/migrations/015_stock_transactions.sql
+tags: [postgres, portfolio, source-of-truth]
 generated:
   by: human:marvellooni
   at: 2026-07-12T00:00:00Z

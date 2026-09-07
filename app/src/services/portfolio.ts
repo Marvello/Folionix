@@ -9,12 +9,14 @@ import { fetchNewsForTicker, summarizeNewsWithLlm } from './news'
 import { callLlm, extractRecommendation, cleanForTelegram } from '../ai/llm'
 import { buildPrompt } from '../ai/prompts'
 import { sendTelegram } from '../telegram/client'
-import { evaluateAlert } from '../telegram/alerts'
-import { normalizeTicker, WIB } from '../../../lib/format'
+import { evaluateAlert, shouldReanalyze } from '../telegram/alerts'
+import { normalizeTicker } from '../../../lib/format'
 
 type Depth = 'LIGHT' | 'FULL' | 'DEEP'
 
 const REC_STABILITY_PCT = Math.max(0, Number(process.env.REC_STABILITY_PCT) || 2) / 100
+// Force a refresh once a call goes stale, even if price never moved.
+const REC_MAX_AGE_HOURS = Math.max(0, Number(process.env.REC_MAX_AGE_HOURS) || 72)
 export type AlertMode = 'spike' | 'dedup' | 'silent'
 
 const SEND_TELEGRAM = process.env.SEND_TELEGRAM !== 'false'
@@ -114,20 +116,15 @@ async function analyzeOneTicker(
 
   const prevAnalysis = await getLatestAnalysis(jk)
 
-  // Skip re-analysis if same WIB trading day and price hasn't moved enough
-  if (prevAnalysis?.analysed_at && snap.current_price != null) {
-    const prevWib = new Date(prevAnalysis.analysed_at).toLocaleDateString('id-ID', { timeZone: WIB })
-    const nowWib = new Date().toLocaleDateString('id-ID', { timeZone: WIB })
-    if (prevWib === nowWib) {
-      const prevPrice = await getSnapshotPrice(prevAnalysis.snapshot_id)
-      if (prevPrice != null && prevPrice > 0) {
-        const delta = Math.abs(snap.current_price - prevPrice) / prevPrice
-        if (delta < REC_STABILITY_PCT) {
-          console.log(`[analysis] ${jk}: skipped (same day, Δ ${(delta * 100).toFixed(1)}% < ${(REC_STABILITY_PCT * 100).toFixed(0)}%)`)
-          return
-        }
-      }
-    }
+  // Skip re-analysis while price sits still and the last call is still fresh —
+  // a repeated unchanged HOLD is noise, not a recommendation.
+  const prevPrice = prevAnalysis ? await getSnapshotPrice(prevAnalysis.snapshot_id) : null
+  const gate = shouldReanalyze(
+    prevAnalysis, prevPrice, snap.current_price, REC_STABILITY_PCT, REC_MAX_AGE_HOURS, new Date(),
+  )
+  if (!gate.reanalyze) {
+    console.log(`[analysis] ${jk}: skipped (${gate.reason})`)
+    return
   }
 
   const [articles, indicators] = await Promise.all([

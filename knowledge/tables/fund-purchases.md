@@ -2,8 +2,8 @@
 type: table
 title: fund_purchases
 description: Per-purchase mutual-fund holdings — fund, platform, units, buy NAV per unit, and purchase date.
-resource: supabase/migrations/005_funds_bonds.sql
-tags: [supabase, funds, source-of-truth]
+resource: db/migrations/005_funds_bonds.sql
+tags: [postgres, funds, source-of-truth]
 generated:
   by: human:marvellooni
   at: 2026-07-12T00:00:00Z

@@ -1,6 +1,6 @@
 # Tables
 
-Base Supabase tables (`supabase_local/schema.sql`).
+Base Postgres tables (`db/schema.sql`).
 
 - [stock_snapshots](stock-snapshots.md) — per-ticker market + position snapshot
 - [llm_analyses](llm-analyses.md) — LLM recommendations linked to snapshots

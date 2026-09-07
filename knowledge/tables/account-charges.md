@@ -2,8 +2,8 @@
 type: table
 title: account_charges
 description: Account-level fees not attributable to any single holding — reduce Total Return, not capital or per-asset income.
-resource: supabase/migrations/019_account_charges.sql
-tags: [supabase, fees, total-return]
+resource: db/migrations/019_account_charges.sql
+tags: [postgres, fees, total-return]
 generated:
   by: human:marvellooni
   at: 2026-07-12T00:00:00Z

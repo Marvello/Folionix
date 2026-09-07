@@ -73,7 +73,7 @@ Concepts: [stock_transactions](tables/stock-transactions.md),
 - **Positions become a derived cache.** `stock_transactions` is the source of
   truth; `portfolio_positions` is wholesale-recomputed by a Postgres trigger on
   every write. Writer-agnostic *by design* — the web app writes directly to
-  Supabase with no backend API in the path, so the trigger (not app code) must
+  Postgres with no backend API in the path, so the trigger (not app code) must
   own the recompute. All existing readers (snapshots pipeline, bot `/status`,
   web) stay untouched.
 - **Weighted-average cost basis.** A SELL never changes `avg_price`; it reduces

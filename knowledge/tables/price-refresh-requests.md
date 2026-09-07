@@ -2,8 +2,8 @@
 type: table
 title: price_refresh_requests
 description: Manual price-refresh signal — the web UI inserts a row, the orchestrator drains pending rows and forces a refetch.
-resource: supabase/schema.sql
-tags: [supabase, signal, price-refresh]
+resource: db/schema.sql
+tags: [postgres, signal, price-refresh]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

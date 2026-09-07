@@ -6,16 +6,16 @@ okf_version: "0.2"
 
 OKF v0.2 knowledge bundle for Folionix — an Indonesian stock portfolio (IDX)
 analyzer. Concepts are organized by type: tables, datasets, metrics, and
-pipelines. Supabase is the source of truth.
+pipelines. Self-hosted Postgres is the source of truth.
 
 ## Sections
 
-- [Tables](tables/index.md) — base Supabase tables
+- [Tables](tables/index.md) — base Postgres tables
 - [Datasets](datasets/index.md) — views, external feeds, derived datasets
 - [Metrics](metrics/index.md) — computed quantities
 - [Pipelines](pipelines/index.md) — orchestration and processing flows
 - [Decisions](decisions.md) — rationale behind implemented features (the "why")
-- [Runbooks](runbooks/supabase-foundation.md) — operational bootstrap (Supabase foundation)
+- [Runbooks](runbooks/postgres-foundation.md) — operational bootstrap (Postgres foundation)
 - [Log](log.md) — dated record of drift fixes and sync passes
 
 ## Flow at a glance

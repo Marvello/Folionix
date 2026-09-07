@@ -2,8 +2,8 @@
 type: table
 title: bond_holdings
 description: Indonesian retail (SR/ORI/SBR/ST) and corporate (CORP) bond holdings, valued at par.
-resource: supabase/migrations/005_funds_bonds.sql
-tags: [supabase, bonds, source-of-truth]
+resource: db/migrations/005_funds_bonds.sql
+tags: [postgres, bonds, source-of-truth]
 generated:
   by: human:marvellooni
   at: 2026-06-23T00:00:00Z

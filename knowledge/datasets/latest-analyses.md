@@ -2,8 +2,8 @@
 type: dataset
 title: latest_analyses
 description: View exposing the most-recent llm_analyses row per ticker.
-resource: supabase/schema.sql
-tags: [supabase, view, llm]
+resource: db/schema.sql
+tags: [postgres, view, llm]
 generated:
   by: human:marvellooni
   at: 2026-06-18T00:00:00Z

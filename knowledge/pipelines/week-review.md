@@ -1,7 +1,7 @@
 ---
 type: pipeline
 title: week review
-description: Weekly retrospective — portfolio WoW numbers across all assets, recommendation ledger with outcomes, local-LLM self-critique, and a handover doc for external LLMs; delivered via Supabase, email (Brevo), and Telegram.
+description: Weekly retrospective — portfolio WoW numbers across all assets, recommendation ledger with outcomes, local-LLM self-critique, and a handover doc for external LLMs; delivered via Postgres, email (Brevo), and Telegram.
 resource: app/src/services/weekReview.ts
 tags: [pipeline, cli, llm, email, telegram, review]
 generated:

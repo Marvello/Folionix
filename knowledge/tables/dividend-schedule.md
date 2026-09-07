@@ -2,8 +2,8 @@
 type: table
 title: dividend_schedule
 description: IDX + yahoo-sourced upcoming dividend schedule per held stock — all four dividend dates from IDX with amount backfill from yahoo; manual override preserved. Forecast only, separate from paid actuals in stock_dividends.
-resource: supabase/migrations/022_dividend_schedule.sql
-tags: [supabase, dividends, schedule, forecast]
+resource: db/migrations/022_dividend_schedule.sql
+tags: [postgres, dividends, schedule, forecast]
 generated:
   by: human:marvellooni
   at: 2026-07-13T00:00:00Z

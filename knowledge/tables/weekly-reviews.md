@@ -2,8 +2,8 @@
 type: table
 title: weekly_reviews
 description: Generated weekly review reports — portfolio WoW numbers plus AI self-review markdown, and a raw-data handover doc for external LLMs.
-resource: supabase/schema.sql
-tags: [supabase, review, report, llm, email]
+resource: db/schema.sql
+tags: [postgres, review, report, llm, email]
 generated:
   by: human:marvellooni
   at: 2026-07-14T00:00:00Z

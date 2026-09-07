@@ -2,8 +2,8 @@
 type: table
 title: fund_catalog
 description: Mutual-fund universe (code, name, type, manager) for the web add-form autocomplete; upserted by the NAV refresh sweep.
-resource: supabase/migrations/005_funds_bonds.sql
-tags: [supabase, funds, source-of-truth]
+resource: db/migrations/005_funds_bonds.sql
+tags: [postgres, funds, source-of-truth]
 generated:
   by: human:marvellooni
   at: 2026-06-23T00:00:00Z

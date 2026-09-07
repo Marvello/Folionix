@@ -2,8 +2,8 @@
 type: table
 title: fund_distributions
 description: Cash distributions received from distributing mutual funds.
-resource: supabase/migrations/018_fund_distributions.sql
-tags: [supabase, funds, income]
+resource: db/migrations/018_fund_distributions.sql
+tags: [postgres, funds, income]
 generated:
   by: human:marvellooni
   at: 2026-07-08T00:00:00Z
