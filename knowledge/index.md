@@ -27,6 +27,15 @@ pipelines. Self-hosted Postgres is the source of truth.
 [orchestrator](pipelines/orchestrator.md). News flows from
 [RSS feeds](datasets/news-rss-feeds.md) → [news_cache](tables/news-cache.md) →
 [news_sentiments](tables/news-sentiments.md) and is injected into analysis prompts.
+Slow-moving fundamentals are fetched on their own daily clock into
+[stock_key_stats](tables/stock-key-stats.md) and
+[stock_financials](tables/stock-financials.md), while splits land in
+[corporate_actions](tables/corporate-actions.md); the
+[corporate_actions_all](datasets/corporate-actions-all.md) view unions the latter
+with [dividend_schedule](tables/dividend-schedule.md) so the stock detail page reads
+one timeline. Coverage is deliberately uneven: thin IDX small-caps have no analyst
+coverage and publish no quarterly statements, so every metric column is nullable and
+the UI drops empty groups rather than showing N/A.
 Stock positions are transaction-backed: every BUY/SELL fill is a row in
 [stock_transactions](tables/stock-transactions.md) (source of truth), and a
 Postgres trigger recomputes [portfolio_positions](tables/portfolio-positions.md)
