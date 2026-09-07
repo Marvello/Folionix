@@ -9,6 +9,7 @@ import { syncDividendSchedules, sendDividendReminders } from '../services/divide
 import { refreshForexRates } from '../services/forex'
 import { refreshGoldPrices } from '../services/gold'
 import { refreshFundNavs, refreshFundHoldings } from '../services/funds'
+import { refreshFundamentals } from '../services/fundamentals'
 import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
 import { runPendingMigrations } from '../db/migrate'
@@ -19,6 +20,10 @@ const BOND_CHECK_HOUR_WIB = 8  // run bond schedule sync at 08:00 WIB daily
 const DIVIDEND_CHECK_HOUR_WIB = 8 // dividend sync + reminders at 08:00 WIB daily
 const FOREX_CHECK_HOUR_WIB = 9 // run forex refresh at 09:00 WIB daily (market open)
 const ASSET_CHECK_HOUR_WIB = 17 // fund NAV refresh at 17:00 WIB daily (NAV final after close)
+// Fundamentals sweep at 18:00 WIB: after the 17:00 fund NAV run, so the two
+// daily jobs do not collide on the same cycle.
+const FUNDAMENTALS_HOUR_WIB = Math.min(23, Math.max(0,
+  Number(process.env.FUNDAMENTALS_HOUR_WIB ?? 18)))
 // Gold moves intraday and its venue quotes are not tied to the IDX close, so it
 // runs on its own clock rather than riding the daily fund sweep.
 const GOLD_INTERVAL_MS = Number(process.env.GOLD_REFRESH_HOURS ?? 3) * 3_600_000
@@ -119,6 +124,7 @@ async function main(): Promise<void> {
   let lastDividendCheckDate = ''
   let lastForexCheckDate = ''
   let lastAssetCheckDate = ''
+  let lastFundamentalsDate = ''
   let lastGoldRefreshMs = 0
   let lastWeekReviewDate = ''
 
@@ -182,6 +188,19 @@ async function main(): Promise<void> {
     if (wibHour >= ASSET_CHECK_HOUR_WIB && lastAssetCheckDate !== todayWib) {
       lastAssetCheckDate = todayWib
       await runAssetDailyRefresh()
+    }
+
+    // Daily fundamentals sweep (>= so a cycle landing after 18:00 still runs it)
+    if (wibHour >= FUNDAMENTALS_HOUR_WIB && lastFundamentalsDate !== todayWib) {
+      lastFundamentalsDate = todayWib
+      try {
+        console.log('[runner] refreshing fundamentals...')
+        const rs = await refreshFundamentals()
+        const ok = rs.filter((r) => !r.error).length
+        console.log(`[runner] fundamentals refreshed ${ok}/${rs.length}`)
+      } catch (err) {
+        console.error('[runner] fundamentals refresh error:', err)
+      }
     }
 
     try {
