@@ -7,9 +7,11 @@ import type {
 } from "@/lib/types";
 import PriceChart from "@/components/PriceChart";
 import AnalysisNewsPanels from "@/components/AnalysisNewsPanels";
+import DetailTabs from "@/components/DetailTabs";
 import type { ChartPoint } from "@/lib/chart";
 import { positionMetrics } from "@/lib/position";
 import { mergeTxnLedger, type LedgerEntry } from "@/lib/ledger-view";
+import { resolveTab } from "@/lib/tabs";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -36,24 +38,35 @@ function num(v: number | null | undefined, suffix = ""): string {
 
 const LEDGER_LABEL: Record<LedgerEntry["type"], string> = { BUY: "Buy", SELL: "Sell", DIVIDEND: "Dividend" };
 
+const NO_ROWS = Promise.resolve({ rows: [] as unknown[] });
+
 export default async function TickerDetail({
   ticker,
   backHref = "/stocks",
+  tab,
 }: {
   ticker: string;
   backHref?: string;
+  tab?: string;
 }) {
   const t = normalizeTicker(ticker);
   const pool = getPool();
+  const active = resolveTab(tab);
+  const onOverview = active === "overview";
+  const onHistory = active === "history";
 
+  // Each tab's own tables are only queried when that tab is active; the header
+  // (position + price history) always runs since it renders on every tab.
   const [snapRes, posRes, txnRes, divRes, anaRes, newsRes, accRes] = await Promise.all([
     pool.query("SELECT * FROM stock_snapshots WHERE ticker = $1 ORDER BY fetched_at DESC LIMIT 1000", [t]),
     pool.query("SELECT * FROM portfolio_positions WHERE ticker = $1 AND active = true LIMIT 1", [t]),
-    pool.query("SELECT * FROM stock_transactions WHERE ticker = $1 ORDER BY txn_at DESC", [t]),
+    onHistory ? pool.query("SELECT * FROM stock_transactions WHERE ticker = $1 ORDER BY txn_at DESC", [t]) : NO_ROWS,
     pool.query("SELECT * FROM stock_dividends WHERE ticker = $1 ORDER BY paid_at DESC", [t]),
-    pool.query("SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 20", [t]),
-    pool.query("SELECT * FROM news_with_latest_sentiment WHERE ticker = $1 AND published_at >= $2 ORDER BY published_at DESC LIMIT 30", [t, newsCutoffIso()]),
-    pool.query("SELECT * FROM recommendation_accuracy($1)", [3]),
+    onOverview ? pool.query("SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 20", [t]) : NO_ROWS,
+    onOverview
+      ? pool.query("SELECT * FROM news_with_latest_sentiment WHERE ticker = $1 AND published_at >= $2 ORDER BY published_at DESC LIMIT 30", [t, newsCutoffIso()])
+      : NO_ROWS,
+    onHistory ? pool.query("SELECT * FROM recommendation_accuracy($1)", [3]) : NO_ROWS,
   ]);
 
   const snaps = snapRes.rows as Snapshot[];
@@ -142,41 +155,9 @@ export default async function TickerDetail({
         <PriceChart points={points} avgCost={metrics?.avgPrice ?? null} />
       </section>
 
-      <section>
-        <h2 className="mb-2 font-semibold text-tprimary">Transactions</h2>
-        {ledger.length === 0 ? (
-          <p className="text-sm text-tdim">No transactions.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs font-semibold text-tdim">
-                  <th className="pb-2 pr-4 text-left">DATE</th>
-                  <th className="pb-2 pr-4 text-left">TYPE</th>
-                  <th className="pb-2 pr-4 text-right">LOTS</th>
-                  <th className="pb-2 pr-4 text-right">PRICE</th>
-                  <th className="pb-2 pr-4 text-right">FEE</th>
-                  <th className="pb-2 text-right">AMOUNT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((r) => (
-                  <tr key={r.key} className="border-t border-edge">
-                    <td className="py-2 pr-4 text-tmuted">{fmtWibDate(r.date)}</td>
-                    <td className={`py-2 pr-4 ${r.type === "SELL" ? "text-down" : r.type === "DIVIDEND" ? "text-up" : "text-tprimary"}`}>{LEDGER_LABEL[r.type]}</td>
-                    <td className="num py-2 pr-4 text-right">{r.lots == null ? "-" : r.lots.toLocaleString("id-ID")}</td>
-                    <td className="num py-2 pr-4 text-right">{r.price == null ? "-" : fmtIdr(r.price)}</td>
-                    <td className="num py-2 pr-4 text-right text-tmuted">{r.fee == null ? "-" : fmtIdr(r.fee)}</td>
-                    <td className="num py-2 text-right">{fmtIdr(r.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      <DetailTabs active={active} hrefFor={(tabId) => `${backHref}?ticker=${displayTicker(t)}&tab=${tabId}`} />
 
-      {latest && (
+      {onOverview && latest && (
         <section>
           <h2 className="mb-2 font-semibold text-tprimary">Fundamentals</h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
@@ -196,47 +177,99 @@ export default async function TickerDetail({
         </section>
       )}
 
-      <section>
-        <h2 className="mb-2 font-semibold text-tprimary">Recommendation Accuracy (3d)</h2>
-        {accuracy.length === 0 ? (
-          <p className="text-sm text-tdim">Not enough history.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-tdim">
-                  <th className="pb-1">WHEN</th>
-                  <th className="pb-1">REC</th>
-                  <th className="pb-1">CHANGE</th>
-                  <th className="pb-1">CORRECT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accuracy.map((r, i) => (
-                  <tr key={i} className="border-t border-edge">
-                    <td className="py-1">{fmtWibDate(r.analysed_at)}</td>
-                    <td className="py-1">{r.recommendation}</td>
-                    <td className={`num py-1 ${(r.actual_change_pct ?? 0) >= 0 ? "text-up" : "text-down"}`}>
-                      {r.actual_change_pct == null ? "-" : `${dirGlyph(r.actual_change_pct)} ${r.actual_change_pct}%`}
-                    </td>
-                    <td className="py-1">
-                      {r.correct == null ? (
-                        "-"
-                      ) : r.correct ? (
-                        <span className="text-up">Correct</span>
-                      ) : (
-                        <span className="text-down">Miss</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      {onOverview && <AnalysisNewsPanels analyses={analyses} news={news} />}
 
-      <AnalysisNewsPanels analyses={analyses} news={news} />
+      {active === "financials" && (
+        <section>
+          <h2 className="mb-2 font-semibold text-tprimary">Financials</h2>
+          <p className="text-sm text-tdim">Coming soon.</p>
+        </section>
+      )}
+
+      {active === "actions" && (
+        <section>
+          <h2 className="mb-2 font-semibold text-tprimary">Actions</h2>
+          <p className="text-sm text-tdim">Coming soon.</p>
+        </section>
+      )}
+
+      {onHistory && (
+        <>
+          <section>
+            <h2 className="mb-2 font-semibold text-tprimary">Transactions</h2>
+            {ledger.length === 0 ? (
+              <p className="text-sm text-tdim">No transactions.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs font-semibold text-tdim">
+                      <th className="pb-2 pr-4 text-left">DATE</th>
+                      <th className="pb-2 pr-4 text-left">TYPE</th>
+                      <th className="pb-2 pr-4 text-right">LOTS</th>
+                      <th className="pb-2 pr-4 text-right">PRICE</th>
+                      <th className="pb-2 pr-4 text-right">FEE</th>
+                      <th className="pb-2 text-right">AMOUNT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ledger.map((r) => (
+                      <tr key={r.key} className="border-t border-edge">
+                        <td className="py-2 pr-4 text-tmuted">{fmtWibDate(r.date)}</td>
+                        <td className={`py-2 pr-4 ${r.type === "SELL" ? "text-down" : r.type === "DIVIDEND" ? "text-up" : "text-tprimary"}`}>{LEDGER_LABEL[r.type]}</td>
+                        <td className="num py-2 pr-4 text-right">{r.lots == null ? "-" : r.lots.toLocaleString("id-ID")}</td>
+                        <td className="num py-2 pr-4 text-right">{r.price == null ? "-" : fmtIdr(r.price)}</td>
+                        <td className="num py-2 pr-4 text-right text-tmuted">{r.fee == null ? "-" : fmtIdr(r.fee)}</td>
+                        <td className="num py-2 text-right">{fmtIdr(r.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-semibold text-tprimary">Recommendation Accuracy (3d)</h2>
+            {accuracy.length === 0 ? (
+              <p className="text-sm text-tdim">Not enough history.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-tdim">
+                      <th className="pb-1">WHEN</th>
+                      <th className="pb-1">REC</th>
+                      <th className="pb-1">CHANGE</th>
+                      <th className="pb-1">CORRECT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accuracy.map((r, i) => (
+                      <tr key={i} className="border-t border-edge">
+                        <td className="py-1">{fmtWibDate(r.analysed_at)}</td>
+                        <td className="py-1">{r.recommendation}</td>
+                        <td className={`num py-1 ${(r.actual_change_pct ?? 0) >= 0 ? "text-up" : "text-down"}`}>
+                          {r.actual_change_pct == null ? "-" : `${dirGlyph(r.actual_change_pct)} ${r.actual_change_pct}%`}
+                        </td>
+                        <td className="py-1">
+                          {r.correct == null ? (
+                            "-"
+                          ) : r.correct ? (
+                            <span className="text-up">Correct</span>
+                          ) : (
+                            <span className="text-down">Miss</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }

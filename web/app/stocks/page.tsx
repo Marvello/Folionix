@@ -9,10 +9,10 @@ import { priceHistory } from "@/lib/history";
 export default async function StocksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ticker?: string }>;
+  searchParams: Promise<{ ticker?: string; tab?: string }>;
 }) {
-  const { ticker } = await searchParams;
-  if (ticker) return <TickerDetail ticker={ticker} backHref="/stocks" />;
+  const { ticker, tab } = await searchParams;
+  if (ticker) return <TickerDetail ticker={ticker} backHref="/stocks" tab={tab} />;
 
   const pool = getPool();
   const [posRes, snapRes, anaRes, watchRes, divRes, chgRes] = await Promise.all([
