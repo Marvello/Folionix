@@ -21,9 +21,17 @@ const DIVIDEND_CHECK_HOUR_WIB = 8 // dividend sync + reminders at 08:00 WIB dail
 const FOREX_CHECK_HOUR_WIB = 9 // run forex refresh at 09:00 WIB daily (market open)
 const ASSET_CHECK_HOUR_WIB = 17 // fund NAV refresh at 17:00 WIB daily (NAV final after close)
 // Fundamentals sweep at 18:00 WIB: after the 17:00 fund NAV run, so the two
-// daily jobs do not collide on the same cycle.
-const FUNDAMENTALS_HOUR_WIB = Math.min(23, Math.max(0,
-  Number(process.env.FUNDAMENTALS_HOUR_WIB ?? 18)))
+// daily jobs do not collide on the same cycle. A non-numeric override would
+// otherwise become NaN and disable the sweep silently and permanently, so fall
+// back loudly. Note 0 is a valid hour, which is why this is a finite check and
+// not a falsy check.
+const rawFundamentalsHour = Number(process.env.FUNDAMENTALS_HOUR_WIB ?? 18)
+const FUNDAMENTALS_HOUR_WIB = Number.isFinite(rawFundamentalsHour)
+  ? Math.min(23, Math.max(0, rawFundamentalsHour))
+  : 18
+if (!Number.isFinite(rawFundamentalsHour)) {
+  console.warn(`[runner] FUNDAMENTALS_HOUR_WIB="${process.env.FUNDAMENTALS_HOUR_WIB}" is not a number, using 18`)
+}
 // Gold moves intraday and its venue quotes are not tied to the IDX close, so it
 // runs on its own clock rather than riding the daily fund sweep.
 const GOLD_INTERVAL_MS = Number(process.env.GOLD_REFRESH_HOURS ?? 3) * 3_600_000
