@@ -16,9 +16,16 @@ import { getPool } from './db.js'
 // it from there.
 
 /**
- * Highest migration folded into db/schema.sql. Everything at or below this is
- * in the database by definition once schema.sql has been applied, so the runner
- * never executes those files — it only backfills their ledger rows.
+ * Highest migration that is already in EVERY database. Everything at or below
+ * this is present by definition, so the runner never executes those files — it
+ * only backfills their ledger rows.
+ *
+ * The rule is "already in every database", NOT "highest number in schema.sql".
+ * db/schema.sql is the snapshot of 001-039, but 039 has not been applied to any
+ * existing database yet, so the baseline stays at 038: a fresh bootstrap gets
+ * 039 from schema.sql (which also inserts its ledger row, so pendingFiles skips
+ * it), and an existing database has no 039 row and executes the file. Setting
+ * the baseline to 039 would record it without ever running the DDL.
  *
  * This is not a belt-and-braces check, it is load-bearing: schema.sql shipped
  * for a long time registering only '034' and '036', so a database bootstrapped
@@ -26,9 +33,9 @@ import { getPool } from './db.js'
  * replay from 001 and abort at 003 with `role "authenticated" does not exist` —
  * migrations 003-033 predate 035_drop_rls and are not runnable on plain Postgres.
  *
- * Bump this when schema.sql is re-snapshotted to fold in newer migrations.
+ * Bump this only once a migration has landed in every live database.
  */
-export const SCHEMA_BASELINE = '039'
+export const SCHEMA_BASELINE = '038'
 
 /** Advisory-lock key, arbitrary but stable — serializes concurrent starts. */
 const LOCK_KEY = 43_370_037

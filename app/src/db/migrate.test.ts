@@ -49,8 +49,10 @@ describe('baselineGaps', () => {
     expect(overlap).toEqual([])
   })
 
-  it('keeps the baseline in step with what schema.sql folds in', () => {
-    expect(SCHEMA_BASELINE).toBe('039')
+  it('keeps the baseline at the highest migration present in every database', () => {
+    // NOT the highest number in schema.sql: 039 ships in schema.sql but has not
+    // been applied to any existing database, so it must still execute there.
+    expect(SCHEMA_BASELINE).toBe('038')
   })
 })
 
