@@ -12,7 +12,7 @@ import { getPool } from './db.js'
 // migration 003 — migrations 003–033 predate 035_drop_rls and still contain
 // Supabase-only constructs (`to authenticated`, `auth.role()`, `revoke ...
 // from anon`) that fail on plain Postgres. schema.sql is the consolidated
-// snapshot of 001–036 and registers all of them; this runner only ever takes
+// snapshot of 001–039 and registers all of them; this runner only ever takes
 // it from there.
 
 /**
