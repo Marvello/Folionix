@@ -262,4 +262,25 @@ describe('mapFinancialPeriod', () => {
     expect(out.net_margin_pct).toBeNull()
     expect(out.currency).toBeNull()
   })
+
+  it('returns null margins when the numerator is absent but revenue is present', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod(
+      { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 28157061000000 }, 'IDR')
+    expect(out.revenue).toBe(28157061000000)
+    expect(out.gross_margin_pct).toBeNull()
+    expect(out.operating_margin_pct).toBeNull()
+    expect(out.net_margin_pct).toBeNull()
+  })
+
+  it('returns null margins when revenue is absent but the numerator is present', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    // Isolates the `revenue == null` branch: without a numerator present it is
+    // masked by the `part == null` short-circuit and never actually proven.
+    const out = mapFinancialPeriod(
+      { endDate: new Date('2026-06-30T00:00:00Z'), netIncome: 14850323000000 }, 'IDR')
+    expect(out.net_income).toBe(14850323000000)
+    expect(out.revenue).toBeNull()
+    expect(out.net_margin_pct).toBeNull()
+  })
 })
