@@ -284,3 +284,40 @@ describe('mapFinancialPeriod', () => {
     expect(out.net_margin_pct).toBeNull()
   })
 })
+
+describe('mapSplits', () => {
+  it('maps yahoo split events to ratio as new-shares-per-old-share', async () => {
+    const { mapSplits } = await import('./market.js')
+    // yahoo reports a 1-becomes-2 split as numerator 2, denominator 1.
+    const out = mapSplits([
+      { date: new Date('2016-01-01T00:00:00.000Z'), numerator: 2, denominator: 1 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].ratio).toBe(2)
+    expect(out[0].event_date).toBe('2016-01-01')
+  })
+
+  it('maps a reverse split to a ratio below 1', async () => {
+    const { mapSplits } = await import('./market.js')
+    const out = mapSplits([
+      { date: new Date('2016-01-01T00:00:00.000Z'), numerator: 1, denominator: 10 },
+    ])
+    expect(out[0].ratio).toBe(0.1)
+  })
+
+  it('handles an ISO string date, as a serialized payload would carry it', async () => {
+    const { mapSplits } = await import('./market.js')
+    const out = mapSplits([
+      { date: '2021-10-04T00:00:00.000Z', numerator: 5, denominator: 1 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].event_date).toBe('2021-10-04')
+    expect(out[0].ratio).toBe(5)
+  })
+
+  it('returns [] for no events', async () => {
+    const { mapSplits } = await import('./market.js')
+    expect(mapSplits(undefined)).toEqual([])
+    expect(mapSplits([])).toEqual([])
+  })
+})

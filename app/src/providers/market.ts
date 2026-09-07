@@ -360,10 +360,11 @@ function marginPct(part: number | null, revenue: number | null): number | null {
   return Number.isFinite(pct) ? Math.round(pct * 100) / 100 : null
 }
 
-/** Slice a Date or ISO string to YYYY-MM-DD. */
+/** Slice a Date, ISO string, or numeric epoch-seconds value to YYYY-MM-DD. */
 function toDay(v: unknown): string | null {
   if (v instanceof Date) return v.toISOString().slice(0, 10)
   if (typeof v === 'string' && v.length >= 10) return v.slice(0, 10)
+  if (typeof v === 'number' && Number.isFinite(v)) return new Date(v * 1000).toISOString().slice(0, 10)
   return null
 }
 
@@ -419,6 +420,47 @@ export async function fetchFinancials(ticker: string): Promise<FinancialPeriod[]
       .sort((a, b) => b.period_end.localeCompare(a.period_end))
   } catch (err) {
     console.error(`[market] financials ${symbol}:`, err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+export interface SplitEvent {
+  event_date: string
+  ratio: number | null
+}
+
+type RawSplit = { date?: Date | string | number; numerator?: number; denominator?: number }
+
+/**
+ * Pure mapping of yahoo's split events. Ratio is stored as new shares per old
+ * share: a 1-becomes-2 split is 2.0, a 1:10 reverse split is 0.1. Getting this
+ * inverted would silently corrupt any future cost-basis adjustment.
+ */
+export function mapSplits(events: RawSplit[] | undefined): SplitEvent[] {
+  if (!events) return []
+  return events
+    .map((e) => {
+      const num = n(e.numerator)
+      const den = n(e.denominator)
+      const day = toDay(e.date)
+      if (!day) return null
+      return { event_date: day, ratio: num != null && den ? num / den : null }
+    })
+    .filter((x): x is SplitEvent => x !== null)
+    .sort((a, b) => b.event_date.localeCompare(a.event_date))
+}
+
+/** Split events for a ticker since `since` (default: 5 years back). */
+export async function fetchSplits(ticker: string, since?: Date): Promise<SplitEvent[]> {
+  const symbol = normalizeTicker(ticker)
+  const from = since ?? new Date(Date.now() - 5 * 365 * 24 * 3_600_000)
+  try {
+    const raw = await withRetry(() =>
+      yf.chart(symbol, { period1: from, interval: '1d', events: 'split' },
+               { validateResult: false })) as { events?: { splits?: RawSplit[] } }
+    return mapSplits(raw.events?.splits)
+  } catch (err) {
+    console.error(`[market] splits ${symbol}:`, err instanceof Error ? err.message : err)
     return []
   }
 }
