@@ -28,27 +28,26 @@
     "dotenv": "^17",
     "got-scraping": "^4.2.1",
     "grammy": "^1",
-    "jose": "^5",
     "marked": "^18.0.6",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.0.1",
     "pg": "^8.23.0",
     "rss-parser": "^3",
-    "tough-cookie": "^5.1.2",
-    "yahoo-finance2": "^3.15.4"
+    "tough-cookie": "^6.0.2",
+    "yahoo-finance2": "^4.0.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.0.1",
     "@types/nodemailer": "^8.0.1",
     "@types/pg": "^8.23.1",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^5.0.0",
     "esbuild": "^0.28",
-    "eslint": "^10.8.1",
+    "eslint": "^10.10.0",
     "globals": "^17.11.0",
     "tsx": "^4",
     "typescript": "^5.7.3",
     "typescript-eslint": "^8.67.0",
-    "vitest": "^4"
+    "vitest": "^5.0.0"
   },
   "overrides": {
     "adm-zip": "^0.6.0",
