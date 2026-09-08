@@ -1,5 +1,5 @@
 import type { CorporateActionRow } from "@/lib/types";
-import { fmtIdr, fmtWibDate } from "@/lib/format";
+import { fmtIdr, fmtWibDate, wibDateKey } from "@/lib/format";
 import EmptyState from "./EmptyState";
 
 const TYPE_LABEL: Record<CorporateActionRow["type"], string> = {
@@ -28,7 +28,7 @@ export default function CorporateActions({ rows }: { rows: CorporateActionRow[] 
   if (rows.length === 0) {
     return <EmptyState message="No corporate actions recorded for this ticker." />;
   }
-  const today = new Date().toISOString().slice(0, 10);
+  const today = wibDateKey();
   const upcoming = rows.filter((r) => r.event_date >= today);
   const past = rows.filter((r) => r.event_date < today);
 

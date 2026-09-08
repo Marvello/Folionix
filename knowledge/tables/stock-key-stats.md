@@ -59,6 +59,15 @@ inflated by the exchange rate. Measured live: BSSR came back with a
 `book_value` to IDR with the same fx rate. Both become null when no rate is
 available, which is better than a number wrong by four orders of magnitude.
 
+The same conversion applies to every other absolute-money field taken from the
+financial statements: `enterprise_value`, `total_cash`, `total_debt`,
+`free_cashflow` and `operating_cashflow` all go through `correctPerShare`
+(currency-agnostic despite the name) and are stored in IDR. Left raw they
+rendered under a hard-coded IDR label, so ADRO's cash read "IDR 1.20B" against
+a true figure near IDR 1,944T. `target_mean` / `target_high` / `target_low` are
+analyst price targets in the quote currency and are **not** converted, and no
+margin, ratio, growth rate or share count is, being dimensionless.
+
 `trailing_eps` and `forward_eps` are **not** converted. Yahoo already reports
 those in the quote currency. The check that proves it: price divided by
 `trailingEps` reproduces yahoo's own published `trailingPE` to four significant

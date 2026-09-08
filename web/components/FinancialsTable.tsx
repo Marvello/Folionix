@@ -1,5 +1,5 @@
 import type { StockFinancialRow } from "@/lib/types";
-import { fmtIdrMagnitude, fmtAgo } from "@/lib/format";
+import { fmtIdrCompact, fmtAgo } from "@/lib/format";
 import { Sparkline } from "./Sparkline";
 import EmptyState from "./EmptyState";
 
@@ -78,13 +78,13 @@ export default function FinancialsTable({ rows }: { rows: StockFinancialRow[] })
               <tr key={`${r.period_end}-${r.period_type}`} className="border-b border-edge/50">
                 <td className="py-2 text-tsecondary">{quarterLabel(r.period_end)}</td>
                 <td className="num py-2 text-right text-tprimary">
-                  {r.revenue == null ? "N/A" : fmtIdrMagnitude(r.revenue)}
+                  {fmtIdrCompact(r.revenue)}
                 </td>
                 <td className={`num py-2 text-right ${
                   r.net_income == null ? "text-tprimary"
                     : r.net_income >= 0 ? "text-up" : "text-down"}`}>
                   {r.net_income == null ? "N/A"
-                    : `${r.net_income >= 0 ? "▲ " : "▼ "}${fmtIdrMagnitude(Math.abs(r.net_income))}`}
+                    : `${r.net_income >= 0 ? "▲ " : "▼ "}${fmtIdrCompact(Math.abs(r.net_income))}`}
                 </td>
                 <td className="num py-2 text-right text-tsecondary">
                   {r.net_margin_pct == null ? "N/A" : `${r.net_margin_pct.toFixed(1)}%`}

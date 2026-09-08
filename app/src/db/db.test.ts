@@ -271,41 +271,4 @@ describe('db', () => {
     expect(params).toEqual(['BBCA', 'SPLIT', '2026-05-01', null, null, '{}', 'yahoo'])
   })
 
-  it('getKeyStats returns null when no row', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] })
-    const { getKeyStats } = await import('./db.js')
-    expect(await getKeyStats('BBCA')).toBeNull()
-  })
-
-  it('getKeyStats returns the row when present', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ ticker: 'BBCA', forward_pe: 12 }] })
-    const { getKeyStats } = await import('./db.js')
-    const row = await getKeyStats('BBCA')
-    expect(row?.forward_pe).toBe(12)
-    expect(mockQuery.mock.calls[0][0]).toContain('stock_key_stats')
-  })
-
-  it('getFinancials filters to QUARTERLY and defaults limit to 8', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] })
-    const { getFinancials } = await import('./db.js')
-    await getFinancials('BBCA')
-    const [sql, params] = mockQuery.mock.calls[0] as [string, unknown[]]
-    expect(sql).toContain("period_type = 'QUARTERLY'")
-    expect(params).toEqual(['BBCA', 8])
-  })
-
-  it('getFinancials passes a custom limit through', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [] })
-    const { getFinancials } = await import('./db.js')
-    await getFinancials('BBCA', 4)
-    expect(mockQuery.mock.calls[0][1]).toEqual(['BBCA', 4])
-  })
-
-  it('getCorporateActions reads the corporate_actions_all view', async () => {
-    mockQuery.mockResolvedValueOnce({ rows: [{ ticker: 'BBCA', type: 'DIVIDEND' }] })
-    const { getCorporateActions } = await import('./db.js')
-    const rows = await getCorporateActions('BBCA')
-    expect(mockQuery.mock.calls[0][0]).toContain('corporate_actions_all')
-    expect(rows).toEqual([{ ticker: 'BBCA', type: 'DIVIDEND' }])
-  })
 })

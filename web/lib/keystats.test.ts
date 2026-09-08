@@ -32,9 +32,9 @@ describe("statGroups", () => {
     } as StockKeyStatsRow;
     const groups = statGroups(full);
     const ev = groups.find((g) => g.label === "Valuation")!.stats.find((s) => s.label === "EV")!;
-    expect(ev.value).toBe("IDR 797,27T");
+    expect(ev.value).toBe("IDR 797.27T");
     const sharesOut = groups.find((g) => g.label === "Ownership")!.stats.find((s) => s.label === "Shares out")!;
-    expect(sharesOut.value).toBe("122,88B");
+    expect(sharesOut.value).toBe("122.88B");
     expect(sharesOut.value).not.toContain("IDR");
     expect(sharesOut.value).not.toContain("Rp");
   });

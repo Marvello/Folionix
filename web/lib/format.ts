@@ -8,52 +8,28 @@ export const fmtIdr = (v: number | null | undefined, decimals = 0): string =>
         maximumFractionDigits: decimals,
       })}`;
 
-/** Compact format for small viewports / metric cards (e.g., IDR 1.2B / IDR 450M / IDR 12.5K). */
-export function fmtIdrCompact(v: number | null | undefined): string {
+/**
+ * Compact format for small viewports / metric cards (e.g., IDR 1.2B / IDR 450M
+ * / IDR 12.5K). Pass an empty prefix for a plain count (shares, not money);
+ * that is the only difference, so there is one function rather than two.
+ */
+export function fmtIdrCompact(v: number | null | undefined, prefix = "IDR "): string {
   if (v == null) return "N/A";
   const abs = Math.abs(v);
   const sign = v < 0 ? "-" : "";
   if (abs >= 1_000_000_000_000) {
-    return `${sign}IDR ${(abs / 1_000_000_000_000).toFixed(2)}T`;
+    return `${sign}${prefix}${(abs / 1_000_000_000_000).toFixed(2)}T`;
   }
   if (abs >= 1_000_000_000) {
-    return `${sign}IDR ${(abs / 1_000_000_000).toFixed(2)}B`;
+    return `${sign}${prefix}${(abs / 1_000_000_000).toFixed(2)}B`;
   }
   if (abs >= 1_000_000) {
-    return `${sign}IDR ${(abs / 1_000_000).toFixed(2)}M`;
+    return `${sign}${prefix}${(abs / 1_000_000).toFixed(2)}M`;
   }
   if (abs >= 1_000) {
-    return `${sign}IDR ${(abs / 1_000).toFixed(1)}K`;
+    return `${sign}${prefix}${(abs / 1_000).toFixed(1)}K`;
   }
-  return fmtIdr(v);
-}
-
-/**
- * Compact IDR magnitude for large balance-sheet figures (enterprise value,
- * cash, debt, revenue): >=1T/1B/1M gets a suffix, matching lib/format.ts's
- * fmtCap thresholds, but with the brand's explicit "IDR" code instead of a
- * bare "Rp" symbol. Falls back to fmtIdr below 1M. Negative values keep sign.
- */
-export function fmtIdrMagnitude(v: number | null | undefined): string | null {
-  if (v == null) return null;
-  const abs = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (abs >= 1e12) return `${sign}IDR ${(abs / 1e12).toFixed(2).replace(".", ",")}T`;
-  if (abs >= 1e9) return `${sign}IDR ${(abs / 1e9).toFixed(2).replace(".", ",")}B`;
-  if (abs >= 1e6) return `${sign}IDR ${(abs / 1e6).toFixed(2).replace(".", ",")}M`;
-  return fmtIdr(v);
-}
-
-/** Compact plain count (shares, not money) - same T/B/M scale, no currency code. */
-export function fmtCountCompact(v: number | null | undefined): string | null {
-  if (v == null) return null;
-  const abs = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (abs >= 1e12) return `${sign}${(abs / 1e12).toFixed(2).replace(".", ",")}T`;
-  if (abs >= 1e9) return `${sign}${(abs / 1e9).toFixed(2).replace(".", ",")}B`;
-  if (abs >= 1e6) return `${sign}${(abs / 1e6).toFixed(2).replace(".", ",")}M`;
-  if (abs >= 1e3) return `${sign}${(abs / 1e3).toFixed(2).replace(".", ",")}K`;
-  return v.toLocaleString("id-ID");
+  return `${sign}${prefix}${abs.toLocaleString("id-ID")}`;
 }
 
 /** Format an amount in any currency. IDR uses id-ID locale (1.234.567); others use en-US (1,234.56). */
@@ -98,6 +74,15 @@ export function fmtWibDate(dt: string | Date | null | undefined): string {
     month: "short",
     year: "numeric",
   }).format(d);
+}
+
+/**
+ * Today's calendar date in WIB as YYYY-MM-DD, for comparing against a plain
+ * `date` column. `toISOString().slice(0, 10)` is the UTC date, which is a day
+ * behind between 00:00 and 07:00 WIB.
+ */
+export function wibDateKey(d: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(d);
 }
 
 /** News older than this is hidden from the feeds (stale RSS lingering in cache). */

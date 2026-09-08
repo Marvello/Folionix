@@ -1,5 +1,5 @@
 import type { StockKeyStatsRow } from "@/lib/types";
-import { fmtIdr, fmtIdrMagnitude, fmtCountCompact } from "@/lib/format";
+import { fmtIdr, fmtIdrCompact } from "@/lib/format";
 
 export type Stat = { label: string; value: string };
 export type Group = { label: string; stats: Stat[] };
@@ -10,10 +10,12 @@ const ratio = (v: number | null | undefined): string | null =>
   v == null ? null : v.toFixed(2);
 const big = (v: number | null | undefined): string | null =>
   v == null ? null : fmtIdr(v);
+/** An absent stat is dropped from its group, so "N/A" becomes null here. */
+const orNull = (formatted: string): string | null => (formatted === "N/A" ? null : formatted);
 /** Large rupiah magnitudes (EV, cash, debt, FCF): compact with an IDR code. */
-const compact = (v: number | null | undefined): string | null => fmtIdrMagnitude(v);
+const compact = (v: number | null | undefined): string | null => orNull(fmtIdrCompact(v));
 /** Share counts, not currency: compact with no currency code. */
-const count = (v: number | null | undefined): string | null => fmtCountCompact(v);
+const count = (v: number | null | undefined): string | null => orNull(fmtIdrCompact(v, ""));
 
 /** Only populated stats survive, and an empty group is dropped whole. A thin
  *  small-cap gets a short card instead of a wall of N/A. */

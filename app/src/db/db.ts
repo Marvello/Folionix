@@ -9,7 +9,6 @@ import type {
   WeeklyReviewRow, RecommendationAccuracyRow, NewsSentimentRow,
   StockDividendRow, FundDistributionRow, AccountChargeRow,
   AnalysisJobRow, PersonaAnalysisRow,
-  StockKeyStatsRow, StockFinancialRow, CorporateActionRow,
 } from '../../../lib/types.js'
 import type { KeyStats, FinancialPeriod } from '../providers/market.js'
 
@@ -793,24 +792,3 @@ export async function saveCorporateActions(
   }
 }
 
-export async function getKeyStats(ticker: string): Promise<StockKeyStatsRow | null> {
-  const { rows } = await q('SELECT * FROM stock_key_stats WHERE ticker = $1', [ticker])
-  return rows[0] ?? null
-}
-
-export async function getFinancials(ticker: string, limit = 8): Promise<StockFinancialRow[]> {
-  const { rows } = await q(
-    `SELECT * FROM stock_financials WHERE ticker = $1 AND period_type = 'QUARTERLY'
-     ORDER BY period_end DESC LIMIT $2`,
-    [ticker, limit],
-  )
-  return rows
-}
-
-export async function getCorporateActions(ticker: string): Promise<CorporateActionRow[]> {
-  const { rows } = await q(
-    'SELECT * FROM corporate_actions_all WHERE ticker = $1 ORDER BY event_date DESC',
-    [ticker],
-  )
-  return rows
-}

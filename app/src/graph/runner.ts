@@ -138,8 +138,13 @@ async function main(): Promise<void> {
 
   while (running) {
     const now = new Date()
-    const wibHour = (now.getUTCHours() + 7) % 24
-    const todayWib = now.toISOString().slice(0, 10)
+    // Shift into WIB once, then read both hour and calendar date off it. Deriving
+    // todayWib from now.toISOString() gave the UTC date, which is a day behind
+    // between 00:00 and 07:00 WIB - every daily latch below would then double-run
+    // or skip for any scheduled hour in that window.
+    const wibNow = new Date(now.getTime() + 7 * 3_600_000)
+    const wibHour = wibNow.getUTCHours()
+    const todayWib = wibNow.toISOString().slice(0, 10)
 
     // Daily portfolio baseline analysis — first active-session cycle of each
     // market day (~09:00 WIB, live prices). Keeps every held position analyzed
