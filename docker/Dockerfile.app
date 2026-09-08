@@ -27,6 +27,10 @@ WORKDIR /app
 RUN addgroup -S appuser && adduser -S appuser -G appuser
 COPY --from=builder /repo/app/dist ./dist
 COPY --from=deps /repo/node_modules ./node_modules
+# Some prod deps can't hoist to the root node_modules (e.g. nodemailer@10 is
+# blocked by next-auth's nodemailer ^7||^8 peer), so npm nests them under the
+# workspace. Merge those in too or the esbuild-external imports 404 at runtime.
+COPY --from=deps /repo/app/node_modules ./node_modules
 COPY --from=builder /repo/lib ./lib
 # Migration SQL is read at runtime by src/db/migrate.ts (found by walking up
 # from the workdir for db/migrations), so it must ship inside the image.
