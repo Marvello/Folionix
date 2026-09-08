@@ -10,6 +10,7 @@ import type {
   StockDividendRow, FundDistributionRow, AccountChargeRow,
   AnalysisJobRow, PersonaAnalysisRow,
 } from '../../../lib/types.js'
+import type { KeyStats, FinancialPeriod } from '../providers/market.js'
 
 pg.types.setTypeParser(1082, (v: string) => v)
 pg.types.setTypeParser(1114, (v: string) => v)
@@ -727,3 +728,67 @@ export async function getRunPersonaResults(runId: string): Promise<PersonaAnalys
   )
   return rows
 }
+
+// ── FUNDAMENTALS ──
+
+const KEY_STAT_COLS = [
+  'forward_pe', 'peg_ratio', 'price_to_book', 'enterprise_value', 'book_value',
+  'trailing_eps', 'forward_eps', 'profit_margins', 'ebitda_margins',
+  'return_on_equity', 'revenue_growth', 'earnings_growth', 'current_ratio',
+  'quick_ratio', 'total_cash', 'total_debt', 'free_cashflow',
+  'operating_cashflow', 'target_mean', 'target_high', 'target_low',
+  'recommendation_key', 'analyst_count', 'shares_outstanding', 'float_shares',
+  'held_pct_insiders', 'held_pct_institutions', 'change_52w',
+] as const
+
+export async function saveKeyStats(ticker: string, stats: KeyStats): Promise<void> {
+  const cols = ['ticker', ...KEY_STAT_COLS, 'fetched_at']
+  const values = [ticker, ...KEY_STAT_COLS.map((c) => stats[c as keyof KeyStats])]
+  const placeholders = values.map((_, i) => `$${i + 1}`).join(', ')
+  const updates = KEY_STAT_COLS.map((c, i) => `${c} = $${i + 2}`).join(', ')
+  await q(
+    `INSERT INTO stock_key_stats (${cols.join(', ')})
+     VALUES (${placeholders}, now())
+     ON CONFLICT (ticker) DO UPDATE SET ${updates}, fetched_at = now()`,
+    values,
+  )
+}
+
+export async function saveFinancials(ticker: string, periods: FinancialPeriod[]): Promise<void> {
+  for (const p of periods) {
+    await q(
+      `INSERT INTO stock_financials
+         (ticker, period_end, period_type, revenue, cost_of_revenue, gross_profit,
+          operating_income, net_income, eps, gross_margin_pct, operating_margin_pct,
+          net_margin_pct, currency, source, fetched_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'yahoo',now())
+       ON CONFLICT (ticker, period_end, period_type) DO UPDATE SET
+         revenue = $4, cost_of_revenue = $5, gross_profit = $6,
+         operating_income = $7, net_income = $8, eps = $9,
+         gross_margin_pct = $10, operating_margin_pct = $11,
+         net_margin_pct = $12, currency = $13, fetched_at = now()`,
+      [ticker, p.period_end, p.period_type, p.revenue, p.cost_of_revenue,
+       p.gross_profit, p.operating_income, p.net_income, p.eps,
+       p.gross_margin_pct, p.operating_margin_pct, p.net_margin_pct, p.currency],
+    )
+  }
+}
+
+export async function saveCorporateActions(
+  ticker: string,
+  type: string,
+  events: Array<{ event_date: string; ratio?: number | null; amount?: number | null; details?: Record<string, unknown> }>,
+  source: string,
+): Promise<void> {
+  for (const e of events) {
+    await q(
+      `INSERT INTO corporate_actions (ticker, type, event_date, ex_date, ratio, amount, details, source, synced_at)
+       VALUES ($1,$2,$3,$3,$4,$5,$6,$7,now())
+       ON CONFLICT (ticker, type, event_date) DO UPDATE SET
+         ratio = $4, amount = $5, details = $6, synced_at = now()`,
+      [ticker, type, e.event_date, e.ratio ?? null, e.amount ?? null,
+       JSON.stringify(e.details ?? {}), source],
+    )
+  }
+}
+

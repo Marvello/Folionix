@@ -4,21 +4,18 @@ import { getPool } from "@/lib/db";
 import { fmtIdr, fmtWib, fmtWibDate, fmtAgo, dirGlyph, newsCutoffIso, normalizeTicker, displayTicker } from "@/lib/format";
 import type {
   Position, Snapshot, Analysis, NewsRow, AccuracyRow, StockTransaction, StockDividend,
+  StockKeyStatsRow, StockFinancialRow, CorporateActionRow,
 } from "@/lib/types";
 import PriceChart from "@/components/PriceChart";
 import AnalysisNewsPanels from "@/components/AnalysisNewsPanels";
+import DetailTabs from "@/components/DetailTabs";
+import KeyStats from "@/components/KeyStats";
+import FinancialsTable from "@/components/FinancialsTable";
+import CorporateActions from "@/components/CorporateActions";
 import type { ChartPoint } from "@/lib/chart";
 import { positionMetrics } from "@/lib/position";
 import { mergeTxnLedger, type LedgerEntry } from "@/lib/ledger-view";
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-edge bg-component p-3">
-      <div className="text-xs text-tdim">{label}</div>
-      <div className="num mt-0.5 text-sm font-semibold text-tprimary">{value}</div>
-    </div>
-  );
-}
+import { resolveTab } from "@/lib/tabs";
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" | null }) {
   const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-tprimary";
@@ -30,30 +27,49 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
-function num(v: number | null | undefined, suffix = ""): string {
-  return v == null ? "N/A" : `${v}${suffix}`;
-}
-
 const LEDGER_LABEL: Record<LedgerEntry["type"], string> = { BUY: "Buy", SELL: "Sell", DIVIDEND: "Dividend" };
+
+const NO_ROWS = Promise.resolve({ rows: [] as unknown[] });
 
 export default async function TickerDetail({
   ticker,
   backHref = "/stocks",
+  tab,
 }: {
   ticker: string;
   backHref?: string;
+  tab?: string;
 }) {
   const t = normalizeTicker(ticker);
   const pool = getPool();
+  const active = resolveTab(tab);
+  const onOverview = active === "overview";
+  const onAnalysis = active === "analysis";
+  const onFinancials = active === "financials";
+  const onActions = active === "actions";
+  const onHistory = active === "history";
 
-  const [snapRes, posRes, txnRes, divRes, anaRes, newsRes, accRes] = await Promise.all([
+  // Each tab's own tables are only queried when that tab is active; the header
+  // (position + price history) always runs since it renders on every tab.
+  const [snapRes, posRes, txnRes, divRes, anaRes, newsRes, accRes, keyStatsRes, financialsRes, actionsRes] = await Promise.all([
     pool.query("SELECT * FROM stock_snapshots WHERE ticker = $1 ORDER BY fetched_at DESC LIMIT 1000", [t]),
     pool.query("SELECT * FROM portfolio_positions WHERE ticker = $1 AND active = true LIMIT 1", [t]),
-    pool.query("SELECT * FROM stock_transactions WHERE ticker = $1 ORDER BY txn_at DESC", [t]),
+    onHistory ? pool.query("SELECT * FROM stock_transactions WHERE ticker = $1 ORDER BY txn_at DESC", [t]) : NO_ROWS,
     pool.query("SELECT * FROM stock_dividends WHERE ticker = $1 ORDER BY paid_at DESC", [t]),
-    pool.query("SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 20", [t]),
-    pool.query("SELECT * FROM news_with_latest_sentiment WHERE ticker = $1 AND published_at >= $2 ORDER BY published_at DESC LIMIT 30", [t, newsCutoffIso()]),
-    pool.query("SELECT * FROM recommendation_accuracy($1)", [3]),
+    onAnalysis ? pool.query("SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 20", [t]) : NO_ROWS,
+    onAnalysis
+      ? pool.query("SELECT * FROM news_with_latest_sentiment WHERE ticker = $1 AND published_at >= $2 ORDER BY published_at DESC LIMIT 30", [t, newsCutoffIso()])
+      : NO_ROWS,
+    onHistory ? pool.query("SELECT * FROM recommendation_accuracy($1)", [3]) : NO_ROWS,
+    onOverview ? pool.query("SELECT * FROM stock_key_stats WHERE ticker = $1", [t]) : NO_ROWS,
+    onFinancials
+      ? pool.query(
+          `SELECT * FROM stock_financials WHERE ticker = $1 AND period_type = 'QUARTERLY'
+           ORDER BY period_end DESC LIMIT 8`, [t])
+      : NO_ROWS,
+    onActions
+      ? pool.query("SELECT * FROM corporate_actions_all WHERE ticker = $1 ORDER BY event_date DESC", [t])
+      : NO_ROWS,
   ]);
 
   const snaps = snapRes.rows as Snapshot[];
@@ -63,6 +79,9 @@ export default async function TickerDetail({
   const analyses = anaRes.rows as Analysis[];
   const news = newsRes.rows as NewsRow[];
   const accuracy = (accRes.rows as AccuracyRow[]).filter((r) => normalizeTicker(r.ticker) === t);
+  const keyStats = (keyStatsRes.rows[0] ?? null) as StockKeyStatsRow | null;
+  const financials = financialsRes.rows as StockFinancialRow[];
+  const actions = actionsRes.rows as CorporateActionRow[];
 
   const latest = snaps[0];
   const held = position != null && (position.lots ?? 0) > 0;
@@ -142,101 +161,93 @@ export default async function TickerDetail({
         <PriceChart points={points} avgCost={metrics?.avgPrice ?? null} />
       </section>
 
-      <section>
-        <h2 className="mb-2 font-semibold text-tprimary">Transactions</h2>
-        {ledger.length === 0 ? (
-          <p className="text-sm text-tdim">No transactions.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs font-semibold text-tdim">
-                  <th className="pb-2 pr-4 text-left">DATE</th>
-                  <th className="pb-2 pr-4 text-left">TYPE</th>
-                  <th className="pb-2 pr-4 text-right">LOTS</th>
-                  <th className="pb-2 pr-4 text-right">PRICE</th>
-                  <th className="pb-2 pr-4 text-right">FEE</th>
-                  <th className="pb-2 text-right">AMOUNT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((r) => (
-                  <tr key={r.key} className="border-t border-edge">
-                    <td className="py-2 pr-4 text-tmuted">{fmtWibDate(r.date)}</td>
-                    <td className={`py-2 pr-4 ${r.type === "SELL" ? "text-down" : r.type === "DIVIDEND" ? "text-up" : "text-tprimary"}`}>{LEDGER_LABEL[r.type]}</td>
-                    <td className="num py-2 pr-4 text-right">{r.lots == null ? "-" : r.lots.toLocaleString("id-ID")}</td>
-                    <td className="num py-2 pr-4 text-right">{r.price == null ? "-" : fmtIdr(r.price)}</td>
-                    <td className="num py-2 pr-4 text-right text-tmuted">{r.fee == null ? "-" : fmtIdr(r.fee)}</td>
-                    <td className="num py-2 text-right">{fmtIdr(r.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      <DetailTabs active={active} hrefFor={(tabId) => `${backHref}?ticker=${displayTicker(t)}&tab=${tabId}`} />
 
-      {latest && (
-        <section>
-          <h2 className="mb-2 font-semibold text-tprimary">Fundamentals</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            <Stat label="P/E" value={num(latest.pe)} />
-            <Stat label="P/B" value={num(latest.pb)} />
-            <Stat label="ROE %" value={num(latest.roe_pct)} />
-            <Stat label="Div Yield %" value={num(latest.div_yield_pct)} />
-            <Stat label="Profit Margin %" value={num(latest.profit_margin_pct)} />
-            <Stat label="Debt/Equity" value={num(latest.debt_to_equity)} />
-            <Stat label="Beta" value={num(latest.beta)} />
-            <Stat label="EPS" value={num(latest.eps)} />
-            <Stat label="52w High" value={fmtIdr(latest.high_52w)} />
-            <Stat label="52w Low" value={fmtIdr(latest.low_52w)} />
-            <Stat label="Volume" value={latest.volume == null ? "N/A" : latest.volume.toLocaleString("id-ID")} />
-            <Stat label="Market Cap" value={fmtIdr(latest.market_cap_raw)} />
-          </div>
-        </section>
+      {onOverview && <KeyStats row={keyStats} />}
+
+      {onAnalysis && <AnalysisNewsPanels analyses={analyses} news={news} />}
+
+      {onFinancials && <FinancialsTable rows={financials} />}
+
+      {onActions && <CorporateActions rows={actions} />}
+
+      {onHistory && (
+        <>
+          <section>
+            <h2 className="mb-2 font-semibold text-tprimary">Transactions</h2>
+            {ledger.length === 0 ? (
+              <p className="text-sm text-tdim">No transactions.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs font-semibold text-tdim">
+                      <th className="pb-2 pr-4 text-left">DATE</th>
+                      <th className="pb-2 pr-4 text-left">TYPE</th>
+                      <th className="pb-2 pr-4 text-right">LOTS</th>
+                      <th className="pb-2 pr-4 text-right">PRICE</th>
+                      <th className="pb-2 pr-4 text-right">FEE</th>
+                      <th className="pb-2 text-right">AMOUNT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ledger.map((r) => (
+                      <tr key={r.key} className="border-t border-edge">
+                        <td className="py-2 pr-4 text-tmuted">{fmtWibDate(r.date)}</td>
+                        <td className={`py-2 pr-4 ${r.type === "SELL" ? "text-down" : r.type === "DIVIDEND" ? "text-up" : "text-tprimary"}`}>{LEDGER_LABEL[r.type]}</td>
+                        <td className="num py-2 pr-4 text-right">{r.lots == null ? "-" : r.lots.toLocaleString("id-ID")}</td>
+                        <td className="num py-2 pr-4 text-right">{r.price == null ? "-" : fmtIdr(r.price)}</td>
+                        <td className="num py-2 pr-4 text-right text-tmuted">{r.fee == null ? "-" : fmtIdr(r.fee)}</td>
+                        <td className="num py-2 text-right">{fmtIdr(r.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section>
+            <h2 className="mb-2 font-semibold text-tprimary">Recommendation Accuracy (3d)</h2>
+            {accuracy.length === 0 ? (
+              <p className="text-sm text-tdim">Not enough history.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-tdim">
+                      <th className="pb-1">WHEN</th>
+                      <th className="pb-1">REC</th>
+                      <th className="pb-1">CHANGE</th>
+                      <th className="pb-1">CORRECT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accuracy.map((r, i) => (
+                      <tr key={i} className="border-t border-edge">
+                        <td className="py-1">{fmtWibDate(r.analysed_at)}</td>
+                        <td className="py-1">{r.recommendation}</td>
+                        <td className={`num py-1 ${(r.actual_change_pct ?? 0) >= 0 ? "text-up" : "text-down"}`}>
+                          {r.actual_change_pct == null ? "-" : `${dirGlyph(r.actual_change_pct)} ${r.actual_change_pct}%`}
+                        </td>
+                        <td className="py-1">
+                          {r.correct == null ? (
+                            "-"
+                          ) : r.correct ? (
+                            <span className="text-up">Correct</span>
+                          ) : (
+                            <span className="text-down">Miss</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </>
       )}
-
-      <section>
-        <h2 className="mb-2 font-semibold text-tprimary">Recommendation Accuracy (3d)</h2>
-        {accuracy.length === 0 ? (
-          <p className="text-sm text-tdim">Not enough history.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-tdim">
-                  <th className="pb-1">WHEN</th>
-                  <th className="pb-1">REC</th>
-                  <th className="pb-1">CHANGE</th>
-                  <th className="pb-1">CORRECT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accuracy.map((r, i) => (
-                  <tr key={i} className="border-t border-edge">
-                    <td className="py-1">{fmtWibDate(r.analysed_at)}</td>
-                    <td className="py-1">{r.recommendation}</td>
-                    <td className={`num py-1 ${(r.actual_change_pct ?? 0) >= 0 ? "text-up" : "text-down"}`}>
-                      {r.actual_change_pct == null ? "-" : `${dirGlyph(r.actual_change_pct)} ${r.actual_change_pct}%`}
-                    </td>
-                    <td className="py-1">
-                      {r.correct == null ? (
-                        "-"
-                      ) : r.correct ? (
-                        <span className="text-up">Correct</span>
-                      ) : (
-                        <span className="text-down">Miss</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      <AnalysisNewsPanels analyses={analyses} news={news} />
     </div>
   );
 }

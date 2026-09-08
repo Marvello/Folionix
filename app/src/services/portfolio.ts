@@ -11,6 +11,7 @@ import { buildPrompt } from '../ai/prompts'
 import { sendTelegram } from '../telegram/client'
 import { evaluateAlert, shouldReanalyze } from '../telegram/alerts'
 import { normalizeTicker } from '../../../lib/format'
+import { mapPool } from '../utils/mapPool.js'
 
 type Depth = 'LIGHT' | 'FULL' | 'DEEP'
 
@@ -24,25 +25,8 @@ const NO_LLM = process.argv.includes('--no-llm')
 const NO_TELEGRAM = process.argv.includes('--no-telegram') || !SEND_TELEGRAM
 
 // Cap concurrent provider fetches so a large portfolio can't burst Yahoo/Finnhub
-// and trip their rate limits. Preserves the PromiseSettledResult shape callers
-// already log over.
+// and trip their rate limits.
 const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROVIDER_CONCURRENCY) || 4)
-
-async function mapPool<T, R>(
-  items: T[], limit: number, fn: (item: T) => Promise<R>,
-): Promise<PromiseSettledResult<R>[]> {
-  const out = new Array<PromiseSettledResult<R>>(items.length)
-  let cursor = 0
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const idx = cursor++
-      try { out[idx] = { status: 'fulfilled', value: await fn(items[idx]) } }
-      catch (reason) { out[idx] = { status: 'rejected', reason } }
-    }
-  })
-  await Promise.all(workers)
-  return out
-}
 
 export async function runPriceRefresh(tickers?: string[]): Promise<void> {
   const portfolio = await loadPortfolio()

@@ -8,6 +8,33 @@ description: Dated record of OKF concept drift fixes and sync passes.
 Append-only. Newest entries first. Each entry records what drifted in the
 codebase and which concept(s) were updated to match.
 
+## 2026-09-07 — Stock detail: key stats, financials, corporate actions
+
+- **Added** `stock_key_stats`, `stock_financials` and `corporate_actions`
+  (migration `039`), plus the `corporate_actions_all` view, and the
+  `services/fundamentals.ts` daily sweep that fills them. The stock detail page
+  became tabbed: Overview, Analysis, Financials, Actions, History.
+- **Coverage is uneven by design and this is now written down.** Probing five
+  IDX tickers found 17 yahoo fields on all five, analyst and quarterly data on
+  four, and nothing on BSSR. Every metric column is nullable; the UI drops an
+  empty stat group rather than rendering N/A.
+- **Currency trap recorded.** Yahoo quotes IDX prices in IDR but reports
+  `bookValue` in the issuer's financial currency, so its `priceToBook` for a USD
+  reporter is inflated by the fx rate: BSSR came back as 48,529 against a true
+  ~3.0. `price_to_book` now goes through the pre-existing `correctPriceToBook`
+  and `book_value` is converted. `trailing_eps` and `forward_eps` are NOT
+  converted, because yahoo already reports those in the quote currency - proven
+  by price/trailingEps reproducing yahoo's own trailingPE to four significant
+  figures.
+- **`corporate_actions.ratio` means new shares per old share**: a 1:2 split is
+  2.0, a 1:10 reverse split is 0.1.
+- **Known gap**: RIGHTS, BONUS and RUPS have no source. IDX's company-detail
+  endpoint carries no such keys and three guessed endpoints returned 503. The
+  `type` column and the union view exist so they can land later as inserts
+  rather than a schema change.
+- `dividend_schedule` was deliberately not migrated: it works and the Telegram
+  bot's ex-date and pay-date reminders read it.
+
 ## 2026-09-07 — Supabase → Postgres doc sync + accuracy metric rewrite
 
 - **Concept drift, long-standing.** Migrations `035_drop_rls` and

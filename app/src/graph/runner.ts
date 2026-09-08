@@ -9,6 +9,7 @@ import { syncDividendSchedules, sendDividendReminders } from '../services/divide
 import { refreshForexRates } from '../services/forex'
 import { refreshGoldPrices } from '../services/gold'
 import { refreshFundNavs, refreshFundHoldings } from '../services/funds'
+import { refreshFundamentals } from '../services/fundamentals'
 import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
 import { runPendingMigrations } from '../db/migrate'
@@ -19,6 +20,18 @@ const BOND_CHECK_HOUR_WIB = 8  // run bond schedule sync at 08:00 WIB daily
 const DIVIDEND_CHECK_HOUR_WIB = 8 // dividend sync + reminders at 08:00 WIB daily
 const FOREX_CHECK_HOUR_WIB = 9 // run forex refresh at 09:00 WIB daily (market open)
 const ASSET_CHECK_HOUR_WIB = 17 // fund NAV refresh at 17:00 WIB daily (NAV final after close)
+// Fundamentals sweep at 18:00 WIB: after the 17:00 fund NAV run, so the two
+// daily jobs do not collide on the same cycle. A non-numeric override would
+// otherwise become NaN and disable the sweep silently and permanently, so fall
+// back loudly. Note 0 is a valid hour, which is why this is a finite check and
+// not a falsy check.
+const rawFundamentalsHour = Number(process.env.FUNDAMENTALS_HOUR_WIB ?? 18)
+const FUNDAMENTALS_HOUR_WIB = Number.isFinite(rawFundamentalsHour)
+  ? Math.min(23, Math.max(0, rawFundamentalsHour))
+  : 18
+if (!Number.isFinite(rawFundamentalsHour)) {
+  console.warn(`[runner] FUNDAMENTALS_HOUR_WIB="${process.env.FUNDAMENTALS_HOUR_WIB}" is not a number, using 18`)
+}
 // Gold moves intraday and its venue quotes are not tied to the IDX close, so it
 // runs on its own clock rather than riding the daily fund sweep.
 const GOLD_INTERVAL_MS = Number(process.env.GOLD_REFRESH_HOURS ?? 3) * 3_600_000
@@ -119,13 +132,19 @@ async function main(): Promise<void> {
   let lastDividendCheckDate = ''
   let lastForexCheckDate = ''
   let lastAssetCheckDate = ''
+  let lastFundamentalsDate = ''
   let lastGoldRefreshMs = 0
   let lastWeekReviewDate = ''
 
   while (running) {
     const now = new Date()
-    const wibHour = (now.getUTCHours() + 7) % 24
-    const todayWib = now.toISOString().slice(0, 10)
+    // Shift into WIB once, then read both hour and calendar date off it. Deriving
+    // todayWib from now.toISOString() gave the UTC date, which is a day behind
+    // between 00:00 and 07:00 WIB - every daily latch below would then double-run
+    // or skip for any scheduled hour in that window.
+    const wibNow = new Date(now.getTime() + 7 * 3_600_000)
+    const wibHour = wibNow.getUTCHours()
+    const todayWib = wibNow.toISOString().slice(0, 10)
 
     // Daily portfolio baseline analysis — first active-session cycle of each
     // market day (~09:00 WIB, live prices). Keeps every held position analyzed
@@ -182,6 +201,19 @@ async function main(): Promise<void> {
     if (wibHour >= ASSET_CHECK_HOUR_WIB && lastAssetCheckDate !== todayWib) {
       lastAssetCheckDate = todayWib
       await runAssetDailyRefresh()
+    }
+
+    // Daily fundamentals sweep (>= so a cycle landing after 18:00 still runs it)
+    if (wibHour >= FUNDAMENTALS_HOUR_WIB && lastFundamentalsDate !== todayWib) {
+      lastFundamentalsDate = todayWib
+      try {
+        console.log('[runner] refreshing fundamentals...')
+        const rs = await refreshFundamentals()
+        const ok = rs.filter((r) => !r.error).length
+        console.log(`[runner] fundamentals refreshed ${ok}/${rs.length}`)
+      } catch (err) {
+        console.error('[runner] fundamentals refresh error:', err)
+      }
     }
 
     try {

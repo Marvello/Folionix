@@ -6,6 +6,7 @@ await build({
     'src/graph/runner.ts',
     'src/graph/worker.ts',
     'src/services/portfolio.ts',
+    'src/services/fundamentals.ts',
     'src/services/weekReview.ts',
     'src/db/migrate.ts',
   ],

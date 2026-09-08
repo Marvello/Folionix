@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const { quoteMock, chartMock, getLatestSnapshotMock, fetchFinnhubQuoteMock, getForexRatesToIdrMock } = vi.hoisted(() => ({
+const { quoteMock, chartMock, quoteSummaryMock, getLatestSnapshotMock, fetchFinnhubQuoteMock, getForexRatesToIdrMock } = vi.hoisted(() => ({
   quoteMock: vi.fn(),
   chartMock: vi.fn(),
+  quoteSummaryMock: vi.fn(),
   getLatestSnapshotMock: vi.fn(),
   fetchFinnhubQuoteMock: vi.fn(),
   getForexRatesToIdrMock: vi.fn(),
@@ -12,6 +13,7 @@ vi.mock('yahoo-finance2', () => ({
   default: class {
     quote = quoteMock
     chart = chartMock
+    quoteSummary = quoteSummaryMock
   },
 }))
 
@@ -177,5 +179,257 @@ describe('fetchDividendAmount', () => {
   it('returns the trailing annual rate', async () => {
     const { fetchDividendAmount } = await import('./market.js')
     expect(await fetchDividendAmount('BBCA')).toBeCloseTo(12.29)
+  })
+})
+
+describe('mapKeyStats', () => {
+  it('maps a populated payload across both yahoo modules', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: {
+        forwardPE: 19.8, pegRatio: 1.8, priceToBook: 4.1, enterpriseValue: 8.2e14,
+        bookValue: 1630, trailingEps: 312, forwardEps: 340, profitMargins: 0.527,
+        sharesOutstanding: 1.23e11, floatShares: 5.5e10,
+        heldPercentInsiders: 0.549, heldPercentInstitutions: 0.121, '52WeekChange': 0.184,
+      },
+      financialData: {
+        targetMeanPrice: 8194.84, targetHighPrice: 9000, targetLowPrice: 7000,
+        recommendationKey: 'strong_buy', numberOfAnalystOpinions: 25,
+        currentRatio: 1.24, quickRatio: 1.1, returnOnEquity: 0.182,
+        revenueGrowth: 0.081, earningsGrowth: 0.064, ebitdaMargins: 0.61,
+        totalCash: 3.1e14, totalDebt: 9.6e13,
+        freeCashflow: 1.24e13, operatingCashflow: 1.9e13,
+      },
+    }, new Map())
+    expect(out.forward_pe).toBe(19.8)
+    expect(out.recommendation_key).toBe('strong_buy')
+    expect(out.analyst_count).toBe(25)
+    expect(out.held_pct_insiders).toBe(0.549)
+    expect(out.change_52w).toBe(0.184)
+  })
+
+  it('returns nulls rather than undefined for a sparse small-cap payload', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    // BSSR shape: key statistics present, no analyst coverage at all.
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 2.7, bookValue: 1800 },
+      financialData: {},
+    }, new Map())
+    expect(out.price_to_book).toBe(2.7)
+    expect(out.target_mean).toBeNull()
+    expect(out.analyst_count).toBeNull()
+    expect(out.forward_pe).toBeNull()
+    expect(Object.values(out).every((v) => v !== undefined)).toBe(true)
+  })
+
+  it('treats an entirely absent module as all nulls', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({}, new Map())
+    expect(out.target_mean).toBeNull()
+    expect(out.price_to_book).toBeNull()
+  })
+
+  it('corrects price_to_book and book_value for a USD-reporting issuer (BSSR shape), leaves trailing_eps alone', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: {
+        priceToBook: 48529.414, bookValue: 0.102, trailingEps: 659.63,
+        enterpriseValue: 74_000_000,
+      },
+      financialData: {
+        financialCurrency: 'USD',
+        totalCash: 120_000_000, totalDebt: 5_000_000,
+        freeCashflow: 40_000_000, operatingCashflow: 55_000_000,
+      },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: 4950 },
+    }, new Map([['USD', 16200]]))
+    expect(out.price_to_book).toBeCloseTo(3.0, 1)
+    expect(out.book_value).toBeCloseTo(1652.4, 0)
+    // Absolute money from the financial statements: converted into IDR, or the
+    // card renders "IDR 1,20B" for a company holding ~IDR 1,944T of cash.
+    expect(out.total_cash).toBe(120_000_000 * 16200)
+    expect(out.total_debt).toBe(5_000_000 * 16200)
+    expect(out.enterprise_value).toBe(74_000_000 * 16200)
+    expect(out.free_cashflow).toBe(40_000_000 * 16200)
+    expect(out.operating_cashflow).toBe(55_000_000 * 16200)
+    // trailingEps is already in the quote currency, unlike bookValue - must not be converted.
+    expect(out.trailing_eps).toBe(659.63)
+  })
+
+  it('nulls price_to_book and book_value when no fx rate is available, but leaves trailing_eps/forward_eps untouched', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 48529.414, bookValue: 0.102, trailingEps: 659.63, forwardEps: 700 },
+      financialData: { financialCurrency: 'USD' },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: 4950 },
+    }, new Map())
+    expect(out.price_to_book).toBeNull()
+    expect(out.book_value).toBeNull()
+    // These never needed an fx rate - an empty rate map must not null them.
+    expect(out.trailing_eps).toBe(659.63)
+    expect(out.forward_eps).toBe(700)
+  })
+
+  it('yields a plausible P/E from the corrected trailing_eps for a USD-reporting issuer (BSSR shape)', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const price = 4950
+    const out = mapKeyStats({
+      defaultKeyStatistics: { trailingEps: 659.63 },
+      financialData: { financialCurrency: 'USD' },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: price },
+    }, new Map([['USD', 16200]]))
+    // Guards against re-introducing a currency conversion on EPS: a wrong unit
+    // would blow this ratio up by roughly the fx rate instead of landing near
+    // yahoo's own published trailingPE of ~7.5 for BSSR.
+    expect(price / (out.trailing_eps as number)).toBeCloseTo(7.5, 1)
+  })
+
+  it('passes price_to_book, book_value, trailing_eps and forward_eps through unchanged when currencies agree (BBCA shape)', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      defaultKeyStatistics: { priceToBook: 2.998, bookValue: 1000, trailingEps: 300, forwardEps: 320, enterpriseValue: 8.2e14 },
+      financialData: { financialCurrency: 'IDR', totalCash: 3.1e14, totalDebt: 9.6e13, freeCashflow: 1.24e13, operatingCashflow: 1.9e13 },
+      summaryDetail: { currency: 'IDR' },
+      price: { regularMarketPrice: 8500 },
+    }, new Map([['USD', 16200]]))
+    expect(out.price_to_book).toBe(2.998)
+    // An IDR reporter must pass straight through, unscaled.
+    expect(out.total_cash).toBe(3.1e14)
+    expect(out.total_debt).toBe(9.6e13)
+    expect(out.enterprise_value).toBe(8.2e14)
+    expect(out.free_cashflow).toBe(1.24e13)
+    expect(out.operating_cashflow).toBe(1.9e13)
+    expect(out.book_value).toBe(1000)
+    expect(out.trailing_eps).toBe(300)
+    expect(out.forward_eps).toBe(320)
+  })
+})
+
+describe('fetchFinancials — reporting currency', () => {
+  it('stamps the issuer financial currency, not the IDR quote currency', async () => {
+    // ADRO shape: quoted in IDR on IDX, reports its income statement in USD.
+    quoteSummaryMock.mockResolvedValue({
+      incomeStatementHistoryQuarterly: {
+        incomeStatementHistory: [
+          { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 1_500_000_000, netIncome: 300_000_000 },
+        ],
+      },
+      summaryDetail: { currency: 'IDR' },
+      financialData: { financialCurrency: 'USD' },
+    })
+    const { fetchFinancials } = await import('./market.js')
+    const out = await fetchFinancials('ADRO')
+    expect(out[0]?.currency).toBe('USD')
+  })
+
+  it('falls back to the quote currency when yahoo reports no financialCurrency', async () => {
+    quoteSummaryMock.mockResolvedValue({
+      incomeStatementHistoryQuarterly: {
+        incomeStatementHistory: [
+          { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 28_157_061_000_000 },
+        ],
+      },
+      summaryDetail: { currency: 'IDR' },
+    })
+    const { fetchFinancials } = await import('./market.js')
+    const out = await fetchFinancials('BBCA')
+    expect(out[0]?.currency).toBe('IDR')
+  })
+})
+
+describe('mapFinancialPeriod', () => {
+  it('computes margins from revenue', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod({
+      endDate: new Date('2026-06-30T00:00:00Z'),
+      totalRevenue: 28157061000000,
+      costOfRevenue: 9412330000000,
+      grossProfit: 18744731000000,
+      operatingIncome: 14641847000000,
+      netIncome: 14850323000000,
+    }, 'IDR')
+    expect(out.period_end).toBe('2026-06-30')
+    expect(out.period_type).toBe('QUARTERLY')
+    expect(out.net_margin_pct).toBeCloseTo(52.74, 1)
+    expect(out.gross_margin_pct).toBeCloseTo(66.57, 1)
+    expect(out.currency).toBe('IDR')
+  })
+
+  it('returns null margins when revenue is zero, never Infinity or NaN', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod(
+      { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 0, netIncome: -5e9 }, 'IDR')
+    expect(out.net_margin_pct).toBeNull()
+    expect(out.gross_margin_pct).toBeNull()
+    expect(out.net_income).toBe(-5e9)
+  })
+
+  it('returns null margins when revenue is absent', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod({ endDate: new Date('2026-03-31T00:00:00Z') }, null)
+    expect(out.revenue).toBeNull()
+    expect(out.net_margin_pct).toBeNull()
+    expect(out.currency).toBeNull()
+  })
+
+  it('returns null margins when the numerator is absent but revenue is present', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    const out = mapFinancialPeriod(
+      { endDate: new Date('2026-06-30T00:00:00Z'), totalRevenue: 28157061000000 }, 'IDR')
+    expect(out.revenue).toBe(28157061000000)
+    expect(out.gross_margin_pct).toBeNull()
+    expect(out.operating_margin_pct).toBeNull()
+    expect(out.net_margin_pct).toBeNull()
+  })
+
+  it('returns null margins when revenue is absent but the numerator is present', async () => {
+    const { mapFinancialPeriod } = await import('./market.js')
+    // Isolates the `revenue == null` branch: without a numerator present it is
+    // masked by the `part == null` short-circuit and never actually proven.
+    const out = mapFinancialPeriod(
+      { endDate: new Date('2026-06-30T00:00:00Z'), netIncome: 14850323000000 }, 'IDR')
+    expect(out.net_income).toBe(14850323000000)
+    expect(out.revenue).toBeNull()
+    expect(out.net_margin_pct).toBeNull()
+  })
+})
+
+describe('mapSplits', () => {
+  it('maps yahoo split events to ratio as new-shares-per-old-share', async () => {
+    const { mapSplits } = await import('./market.js')
+    // yahoo reports a 1-becomes-2 split as numerator 2, denominator 1.
+    const out = mapSplits([
+      { date: new Date('2016-01-01T00:00:00.000Z'), numerator: 2, denominator: 1 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].ratio).toBe(2)
+    expect(out[0].event_date).toBe('2016-01-01')
+  })
+
+  it('maps a reverse split to a ratio below 1', async () => {
+    const { mapSplits } = await import('./market.js')
+    const out = mapSplits([
+      { date: new Date('2016-01-01T00:00:00.000Z'), numerator: 1, denominator: 10 },
+    ])
+    expect(out[0].ratio).toBe(0.1)
+  })
+
+  it('handles an ISO string date, as a serialized payload would carry it', async () => {
+    const { mapSplits } = await import('./market.js')
+    const out = mapSplits([
+      { date: '2021-10-04T00:00:00.000Z', numerator: 5, denominator: 1 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0].event_date).toBe('2021-10-04')
+    expect(out[0].ratio).toBe(5)
+  })
+
+  it('returns [] for no events', async () => {
+    const { mapSplits } = await import('./market.js')
+    expect(mapSplits(undefined)).toEqual([])
+    expect(mapSplits([])).toEqual([])
   })
 })
