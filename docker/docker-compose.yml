@@ -5,7 +5,7 @@ services:
 
   # ── Postgres ──
   folionix-db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     container_name: folionix-db
     restart: unless-stopped
     environment:
@@ -13,7 +13,7 @@ services:
       - POSTGRES_USER=${POSTGRES_USER:-folionix}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
     ports:
       - "5432:5432"
     deploy:

@@ -10,6 +10,6 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Build & Deploy
 
-- `web/Dockerfile`: three-stage build (`deps` → `builder` → `runner`) using Next standalone output; `npm ci` uses a BuildKit cache mount (`/root/.npm`), so lockfile changes reinstall fast on warm caches.
+- `docker/Dockerfile.web`: two-stage workspace build (`builder` → `runner`) using Next standalone output; `npm ci -w web` uses a BuildKit cache mount (`/root/.npm`), so lockfile changes reinstall fast on warm caches.
 - `NEXT_PUBLIC_*` env vars are **not** baked at build time — the root layout injects them at runtime via `window.__ENV` from the container env. Never add build-args for them.
 - Image `marvellooni/folionix-web` is built multi-arch by `.github/workflows/build.yml` (native amd64 + arm64 runners, gha layer cache, digest push + manifest merge), gated on `npm run build` passing in the `test-web` job.

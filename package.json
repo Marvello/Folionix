@@ -6,5 +6,8 @@
     "app",
     "web",
     "lib"
-  ]
+  ],
+  "engines": {
+    "node": ">=24"
+  }
 }

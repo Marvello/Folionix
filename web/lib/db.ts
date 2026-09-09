@@ -1,5 +1,10 @@
-import { createPool } from "@marvello/common-tech/client";
 import pg from "pg";
+
+// Shared Postgres client pattern — see github.com/Marvello/common-tech (README).
+// Inlined instead of a shared package: ~4 lines, nothing to version across repos.
+function createPool(config: pg.PoolConfig & { max?: number }): pg.Pool {
+  return new pg.Pool({ ...config, max: config.max ?? 10 });
+}
 
 // Return dates/timestamps as ISO strings (matching PostgREST behavior)
 // so the rest of the codebase can .slice(), compare, and serialize them.

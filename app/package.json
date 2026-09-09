@@ -23,7 +23,6 @@
     "@folionix/lib": "*",
     "@langchain/core": "^1",
     "@langchain/langgraph": "^1",
-    "@marvello/common-tech": "^1.0.0",
     "ai": "^7",
     "dotenv": "^17",
     "got-scraping": "^4.2.1",
@@ -53,5 +52,8 @@
     "adm-zip": "^0.6.0",
     "fast-uri": "^3.1.4",
     "@hono/node-server": "^2.0.5"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

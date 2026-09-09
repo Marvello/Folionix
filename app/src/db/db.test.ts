@@ -13,10 +13,6 @@ vi.mock('pg', () => {
   return { default: { Pool, types: { setTypeParser: () => {} } } }
 })
 
-vi.mock('@marvello/common-tech/client', () => ({
-  createPool: () => ({ query: mockQuery, connect: mockConnect }),
-}))
-
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test'
 
 describe('db', () => {

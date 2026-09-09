@@ -1,5 +1,4 @@
 import 'dotenv/config'
-import { createPool } from '@marvello/common-tech/client'
 import pg from 'pg'
 import type {
   StockSnapshotRow, PositionRow, GoldPurchaseRow,
@@ -11,6 +10,12 @@ import type {
   AnalysisJobRow, PersonaAnalysisRow,
 } from '../../../lib/types.js'
 import type { KeyStats, FinancialPeriod } from '../providers/market.js'
+
+// Shared Postgres client pattern — see github.com/Marvello/common-tech (README).
+// Inlined instead of a shared package: nothing to version across repos.
+function createPool(config: pg.PoolConfig & { max?: number }): pg.Pool {
+  return new pg.Pool({ ...config, max: config.max ?? 10 })
+}
 
 pg.types.setTypeParser(1082, (v: string) => v)
 pg.types.setTypeParser(1114, (v: string) => v)
