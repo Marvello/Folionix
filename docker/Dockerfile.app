@@ -6,7 +6,8 @@ ARG NPM_TOKEN
 COPY .npmrc package.json package-lock.json ./
 COPY lib/ ./lib/
 COPY app/package.json ./app/
-RUN echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc && \
+RUN --mount=type=cache,target=/root/.npm \
+    echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc && \
     npm ci --omit=dev -w app && \
     rm -f .npmrc
 
@@ -16,7 +17,8 @@ ARG NPM_TOKEN
 COPY .npmrc package.json package-lock.json ./
 COPY lib/ ./lib/
 COPY app/package.json ./app/
-RUN echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc && \
+RUN --mount=type=cache,target=/root/.npm \
+    echo "//npm.pkg.github.com/:_authToken=${NPM_TOKEN}" >> .npmrc && \
     npm ci -w app && \
     rm -f .npmrc
 COPY app/ ./app/
