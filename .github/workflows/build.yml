@@ -5,14 +5,8 @@
 # Repo secrets (Settings → Secrets and variables → Actions):
 #   DOCKERHUB_USERNAME    — Docker Hub username (marvellooni)
 #   DOCKERHUB_TOKEN       — Docker Hub access token (read/write)
-#   TS_OAUTH_CLIENT_ID    — Tailscale OAuth client id (scoped to the ACL tag below)
-#   TS_OAUTH_SECRET       — Tailscale OAuth client secret
-#   DOCKHAND_API_KEY      — Dockhand API key (sent as X-API-Key on the deploy call)
 #   NPM_TOKEN             — Classic PAT with read:packages (GitHub Packages auth)
-# Repo variables:
-#   DOCKHAND_URL          — Dockhand base URL on the tailnet (e.g. http://dockhand:8080)
-#   DOCKHAND_STACK        — stack name to redeploy (e.g. folionix)
-# The deploy job joins the tailnet with an ephemeral node (tag:ci) to reach Dockhand.
+# Deployment is outside this workflow: it only publishes the :latest / :<sha8> images.
 # NEXT_PUBLIC_* are not needed: the web image reads them at runtime.
 
 name: build
@@ -226,34 +220,3 @@ jobs:
             -t marvellooni/folionix-web:latest \
             -t marvellooni/folionix-web:${{ steps.vars.outputs.sha8 }} \
             $(printf 'marvellooni/folionix-web@sha256:%s ' $(ls /tmp/digests))
-
-  # ── Deploy: redeploy the Dockhand stack once the image(s) are published ──
-  # Runs after whichever chain(s) ran, provided none failed and at least one
-  # published a fresh manifest. Joins the tailnet with an ephemeral node to
-  # reach the (private) Dockhand API, then triggers a pull + force-recreate redeploy.
-  deploy:
-    needs: [merge-app, merge-web]
-    if: >-
-      always() &&
-      needs.merge-app.result != 'failure' &&
-      needs.merge-web.result != 'failure' &&
-      (needs.merge-app.result == 'success' || needs.merge-web.result == 'success')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Join tailnet (ephemeral)
-        uses: tailscale/github-action@v3
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-      - name: Redeploy stack via Dockhand
-        env:
-          DOCKHAND_URL: ${{ vars.DOCKHAND_URL }}
-          DOCKHAND_STACK: ${{ vars.DOCKHAND_STACK }}
-          DOCKHAND_API_KEY: ${{ secrets.DOCKHAND_API_KEY }}
-        run: |
-          curl -fsS --max-time 120 -X POST \
-            "${DOCKHAND_URL%/}/api/stacks/${DOCKHAND_STACK}/deploy" \
-            -H "Authorization: Bearer ${DOCKHAND_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d '{"pull": true, "build": false, "forceRecreate": true}'
