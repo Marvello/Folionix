@@ -241,7 +241,7 @@ export function buildHandoverDoc(args: {
     '',
     '## System description',
     '',
-    `- Analysis model: \`${args.model}\` via Vercel AI SDK (Ollama/LiteLLM), temperature 0.3, max ~4096 output tokens.`,
+    `- Analysis model: \`${args.model}\` via Vercel AI SDK (Ollama or an OpenAI-compatible gateway), temperature 0.3, max ~4096 output tokens.`,
     '- Per-ticker prompt contains: IDX market-session label (WIB), price block (current, day change, volume, 52w range), investor position (lots, avg price, P&L) for held stocks, fundamentals (P/E, P/B, dividend yield, market cap) on FULL/DEEP depth, a TECHNICALS block computed from snapshot history (SMA20/50, RSI14, 1W momentum, volume vs 20d avg, IHSG relative strength), optional news-sentiment summary (RSS headlines summarized by the same LLM), and a required Telegram-HTML output template ending in a mandatory `REKOMENDASI: <keyword>` line.',
     '- Held positions get action sizing vs a Rp 1,000,000 materiality threshold but must still state a market view; watchlist tickers are asked for a pure entry signal (BUY / MONITOR / HOLD) with no threshold.',
     '- Recommendation extracted from the REKOMENDASI line (fallback: keyword scan): AVERAGE DOWN, TAKE PROFIT, CUT LOSS, HOLD, MONITOR, BUY, TRIM.',

@@ -244,7 +244,7 @@ If total P&L is below Rp 1.000.000 note that the amount is not yet material, but
 
 PRICE:
 - Current  : ${fmtIdr(price)} (${arrow(snapshot.day_change_pct)} ${sign(dayPct)}${dayPct.toFixed(2)}%)
-- Volume   : ${snapshot.volume != null ? fmtNum(snapshot.volume) : 'N/A'} lots
+- Volume   : ${snapshot.volume != null ? fmtNum(snapshot.volume) : 'N/A'} shares
 - 52W High : ${fmtIdr(snapshot.high_52w ?? 0)} | 52W Low: ${fmtIdr(snapshot.low_52w ?? 0)}
 ${pnlBlock}
 ${fundamentalsBlock}

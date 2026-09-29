@@ -24,7 +24,7 @@ function resolveTarget(
 
   // Both backends speak the OpenAI wire format. Use .chat() explicitly:
   // provider(model) defaults to the Responses API (/responses), which
-  // LiteLLM/Ollama answer with a shape the SDK rejects ("Invalid JSON
+  // Ollama and most gateways answer with a shape the SDK rejects ("Invalid JSON
   // response"); /chat/completions is what they actually support.
   if (effectiveBackend === 'ollama') {
     // Native Ollama via its OpenAI-compatible endpoint — ollama-ai-provider
@@ -33,7 +33,7 @@ function resolveTarget(
     const provider = createOpenAI({ baseURL: `${base}/v1`, apiKey: apiKey ?? 'ollama' })
     langModel = provider.chat(model)
   } else {
-    // litellm or any OpenAI-compatible endpoint
+    // any OpenAI-compatible gateway
     const openai = createOpenAI({ baseURL: apiBase, apiKey: apiKey ?? 'none' })
     langModel = openai.chat(model)
   }
@@ -111,7 +111,7 @@ export async function callLlm(
 
   for (const target of targets) {
     try {
-      // Stream rather than generateText: gateways in front of this (omniroute)
+      // Stream rather than generateText: some gateways in front of this
       // answer text/event-stream even for a non-streamed request, which
       // generateText rejects as "Invalid JSON response". Consuming the stream
       // and awaiting the full text works against streaming and plain

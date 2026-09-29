@@ -177,14 +177,13 @@ Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-
 |----------|-------------|
 | `DATABASE_URL` | Postgres connection string — read by both `app/` and `web/`; server-side only |
 | `AUTH_SECRET` / `AUTH_URL` | NextAuth session signing and base URL (web) |
-| `LLM_BACKEND` | `ollama` or `litellm` |
+| `LLM_BACKEND` | `ollama`, or `openai` for any OpenAI-compatible gateway |
 | `LLM_MODEL` | LLM model name (e.g. `qwen2.5:7b`) |
 | `LLM_API_BASE` | LLM API endpoint |
 | `LLM_API_KEY` | LLM API key (if required) |
 | `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID` | Bot token and allowed chat ID whitelist |
 | `SEND_TELEGRAM` | `true`/`false` — enable/disable Telegram alerts |
 | `CACHE_MINUTES` | Skip re-fetch if data is fresh (default: `30`) |
-| `ACTION_THRESHOLD_IDR` | Min P&L (Rp) to trigger action recommendation |
 | `FINNHUB_API_KEY` | Optional; enables Finnhub fallback when yahoo-finance2 fails |
 | `CERMATI_GRAPHQL_URL` | Cermati gold-price GraphQL endpoint |
 | `CERMATI_MF_URL` | Cermati mutual-fund products REST endpoint |
@@ -216,7 +215,7 @@ The LangGraph orchestrator (`folionix-graph`) replaces cron with adaptive, signa
 ## Tech Stack
 
 - **Data:** yahoo-finance2 (primary), Finnhub (fallback), Cermati (gold + funds), KSEI (bond coupons)
-- **LLM:** Vercel AI SDK — Ollama or LiteLLM backend (any model)
+- **LLM:** Vercel AI SDK — Ollama or any OpenAI-compatible gateway (any model)
 - **Orchestration:** @langchain/langgraph (session-aware, signal-driven)
 - **Database:** self-hosted Postgres 17 via node-postgres (raw SQL, no ORM)
 - **Bot:** grammy (Telegram, long-polling)
