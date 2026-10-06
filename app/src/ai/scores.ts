@@ -1,3 +1,4 @@
+import type { ValuationResult } from './valuation'
 import type { StockSnapshotRow } from '../../../lib/types'
 import type { Indicators } from './indicators'
 import { rsiLabel } from './indicators'
@@ -58,6 +59,32 @@ function technicalScore(snap: StockSnapshotRow, ind: Indicators | null): SubScor
   return { score: clamp(score / 2), rationale: parts.join('; ') }
 }
 
+/**
+ * Relative valuation from the sector-aware 3-way comparison (ai/valuation.ts):
+ * a discount to peers scores positive, a premium negative — halved when quality
+ * explains the gap — plus a smaller pull from the stock's own multi-year average.
+ */
+export function relativeValuationScore(v: ValuationResult): SubScore {
+  if (v.value == null) return NO_DATA
+  let score = 0
+  const parts: string[] = []
+  if (v.peers.diff != null) {
+    let peer = Math.max(-50, Math.min(50, -v.peers.diff * 100))
+    const explained = (v.peers.verdict === 'premium' && v.quality.verdict === 'stronger')
+      || (v.peers.verdict === 'discount' && v.quality.verdict === 'weaker')
+    if (explained) peer /= 2
+    score += peer
+    parts.push(`${v.multiple_name} ${v.peers.verdict} vs ${v.peers.count} peers${explained ? ` (explained by ${v.quality.verdict} ${v.quality.name})` : ''}`)
+  }
+  if (v.own.diff != null) {
+    score += Math.max(-30, Math.min(30, -v.own.diff * 40))
+    parts.push(`${v.own.verdict} its ${v.own.years}y average`)
+  }
+  if (parts.length === 0) return NO_DATA
+  return { score: clamp(score), rationale: parts.join('; ') }
+}
+
+/** Fallback when no peer valuation exists yet: crude absolute bands. */
 function valuationScore(snap: StockSnapshotRow): SubScore {
   let score = 0
   const parts: string[] = []
@@ -119,9 +146,11 @@ export function computeAnalystScores(
   snap: StockSnapshotRow,
   indicators: Indicators | null,
   newsScore: number | null,
+  peerValuation?: ValuationResult | null,
 ): AnalystScores {
   const technical = technicalScore(snap, indicators)
-  const valuation = valuationScore(snap)
+  const relative = peerValuation ? relativeValuationScore(peerValuation) : NO_DATA
+  const valuation = relative !== NO_DATA ? relative : valuationScore(snap)
   const sentiment = sentimentScoreOf(newsScore)
   const momentum = momentumScore(indicators)
 

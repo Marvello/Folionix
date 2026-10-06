@@ -63,6 +63,8 @@ export function buildPrompt(
   newsSentiment?: string,
   metadata?: { name?: string; sector?: string; industry?: string },
   indicators?: Indicators | null,
+  /** One-line 3-way peer valuation (ai/valuation.ts summary), computed in code. */
+  valuation?: string | null,
 ): string {
   const ticker = snapshot.ticker.replace('.JK', '')
   const price = snapshot.current_price ?? 0
@@ -165,6 +167,10 @@ FUNDAMENTALS:
     trendBlock = `PRICE TREND:\n- 1W Change: ${sign(weekChangePct)}${weekChangePct.toFixed(2)}%`
   }
 
+  // ── Peer valuation block (FULL/DEEP) ──
+  const valuationBlock = valuation && depth !== 'LIGHT'
+    ? `VALUATION (sector-aware, computed — the right multiple for this sector vs peer median, a quality metric that can justify a gap, and its own multi-year average):\n- ${valuation}`
+    : ''
   // ── News sentiment block ──
   let newsBlock = ''
   if (newsSentiment) {
@@ -179,12 +185,18 @@ FUNDAMENTALS:
     extraInstructions = ''
   } else if (depth === 'DEEP') {
     wordLimit = 300
-    // No peer data is supplied, so no sector-comparison section (it invited invented peers).
-    extraInstructions = 'Go deeper on the technicals and fundamentals provided.\n'
+    // Sector comparison only when real peer data is supplied — otherwise the model invents peers.
+    extraInstructions = valuation
+      ? 'Include a short Sector Comparison section using ONLY the VALUATION block (peer median, quality metric, own history).\n'
+      : 'Go deeper on the technicals and fundamentals provided.\n'
   } else {
     // FULL (default)
     wordLimit = 200
     extraInstructions = ''
+  }
+
+  if (valuation && depth === 'FULL') {
+    extraInstructions += 'Use the VALUATION line to say whether the stock looks cheap or expensive versus peers and its own history, and whether quality justifies it.\n'
   }
 
   if (newsSentiment) {
@@ -249,6 +261,7 @@ PRICE:
 - 52W High : ${snapshot.high_52w != null ? fmtIdr(snapshot.high_52w) : 'N/A'} | 52W Low: ${snapshot.low_52w != null ? fmtIdr(snapshot.low_52w) : 'N/A'}
 ${pnlBlock}
 ${fundamentalsBlock}
+${valuationBlock}
 ${technicalsBlock}
 ${trendBlock}
 ${newsBlock}

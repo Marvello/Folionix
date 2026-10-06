@@ -46,3 +46,22 @@ describe('fetchDividendSchedule', () => {
     expect(a.sessionToken).toBe(b.sessionToken)
   })
 })
+
+describe('IDX-IC classification', () => {
+  const row = { KodeEmiten: 'BBCA', NamaEmiten: 'PT Bank Central Asia Tbk.', Sektor: 'Keuangan', SubSektor: 'Bank',
+    Industri: 'Bank', SubIndustri: 'Bank', PapanPencatatan: 'Utama', TanggalPencatatan: '2000-05-31T00:00:00' }
+
+  it('maps a profile row to a yahoo-keyed classification', async () => {
+    const { mapClassification } = await import('./idx.js')
+    expect(mapClassification(row)).toEqual({ ticker: 'BBCA.JK', name: 'PT Bank Central Asia Tbk.', sector: 'Keuangan',
+      sub_sector: 'Bank', industry: 'Bank', sub_industry: 'Bank', board: 'Utama', listed_at: '2000-05-31' })
+    expect(mapClassification({ NamaEmiten: 'no code' })).toBeNull()
+  })
+
+  it('refuses a truncated listing rather than shrinking the table', async () => {
+    const { gotScraping } = await import('got-scraping')
+    vi.mocked(gotScraping).mockResolvedValueOnce({ statusCode: 200, body: JSON.stringify({ data: [row] }) } as never)
+    const { fetchClassifications } = await import('./idx.js')
+    await expect(fetchClassifications()).rejects.toThrow('only 1 rows')
+  })
+})

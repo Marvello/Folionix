@@ -5,7 +5,7 @@ const auth = vi.fn();
 vi.mock("@/lib/db", () => ({ getPool: () => ({ query }) }));
 vi.mock("@/lib/auth", () => ({ auth: () => auth() }));
 
-const { insertStockTransaction, fetchFilteredNews, deleteAccountCharge } = await import("./actions");
+const { insertStockTransaction, fetchFilteredNews, deleteAccountCharge, promotePeer } = await import("./actions");
 
 const txn = { ticker: "BBCA.JK", side: "BUY", lots: 1, price: 9000, fee: 0, txn_at: "2026-10-06", notes: "" };
 
@@ -34,6 +34,16 @@ describe("server actions", () => {
     query.mockResolvedValueOnce({ rows: [{ lots: 2 }] });
     await expect(insertStockTransaction({ ...txn, side: "SELL", lots: 3 })).rejects.toThrow("only 2 held");
     expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("promotes only peer rows, behind the session + ticker guards", async () => {
+    await expect(promotePeer("bbca")).rejects.toThrow("Invalid ticker");
+    auth.mockResolvedValueOnce(null);
+    await expect(promotePeer("BBCA.JK")).rejects.toThrow("Unauthorized");
+    expect(query).not.toHaveBeenCalled();
+    await promotePeer("BBCA.JK");
+    expect(query.mock.calls[0][0]).toMatch(/SET kind = 'user' WHERE ticker = \$1 AND kind = 'peer'/);
+    expect(query.mock.calls[0][1]).toEqual(["BBCA.JK"]);
   });
 
   it("caps the news page size", async () => {

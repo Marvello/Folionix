@@ -8,6 +8,7 @@ await build({
     'src/services/portfolio.ts',
     'src/services/fundamentals.ts',
     'src/services/weekReview.ts',
+    'src/services/peers.ts',
     'src/db/migrate.ts',
     'src/utils/heartbeat.ts',
   ],

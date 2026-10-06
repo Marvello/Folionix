@@ -46,7 +46,7 @@ export interface Analysis {
 export interface WatchRow {
   id?: number;
   ticker: string;
-  kind: "user" | "ai_suggested";
+  kind: "user" | "ai_suggested" | "peer";
   notes: string | null;
   sector: string | null;
   rationale: string | null;

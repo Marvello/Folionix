@@ -10,6 +10,7 @@ import { refreshForexRates } from '../services/forex'
 import { refreshGoldPrices } from '../services/gold'
 import { refreshFundNavs, refreshFundHoldings } from '../services/funds'
 import { refreshFundamentals } from '../services/fundamentals'
+import { computeValuations, refreshPeers } from '../services/peers'
 import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
 import { runPendingMigrations } from '../db/migrate'
@@ -50,6 +51,7 @@ const WEEK_REVIEW_DAY_WIB = 6   // Saturday in WIB
 // History retention is a data-deletion policy, so it is opt-in: unset = keep everything.
 const RETENTION_DAYS = Number(process.env.RETENTION_DAYS) > 0 ? Number(process.env.RETENTION_DAYS) : 0
 const RETENTION_HOUR_WIB = 2
+const PEERS_HOUR_WIB = 19
 const REFRESH_POLL_MS = 30_000  // how often an idle runner checks for dashboard refresh requests
 
 let running = true
@@ -230,8 +232,22 @@ async function main(): Promise<void> {
         const rs = await refreshFundamentals()
         const ok = rs.filter((r) => !r.error).length
         console.log(`[runner] fundamentals refreshed ${ok}/${rs.length}`)
+        // Fresh key stats → recompute every holding's 3-way peer valuation.
+        console.log(`[runner] valuations computed: ${await computeValuations()}`)
       } catch (err) {
         console.error('[runner] fundamentals refresh error:', err)
+      }
+    }
+
+    // Weekly peer refresh (IDX classification → peer groups → watchlist `peer` rows →
+    // own-history multiples → valuations). Evening, after the 18:00 fundamentals sweep;
+    // claimed once per ISO week (key = that week's Monday, WIB).
+    const weekKey = new Date(wibNow.getTime() - ((wibNow.getUTCDay() + 6) % 7) * 86_400_000).toISOString().slice(0, 10)
+    if (wibHour >= PEERS_HOUR_WIB && await due('peer-refresh', weekKey)) {
+      try {
+        console.log('[runner] peer refresh:', await refreshPeers())
+      } catch (err) {
+        console.error('[runner] peer refresh error:', err)
       }
     }
 

@@ -127,3 +127,11 @@ describe('buildPersonaPrompt key stats', () => {
     expect(user).toContain('current ratio n/a')
   })
 })
+
+describe('buildPersonaPrompt valuation', () => {
+  it('shows the computed 3-way valuation, or n/a', () => {
+    const v = 'P/B 2.8× · vs peers 1.3× (+112%, premium, n=8) → premium backed by stronger ROE'
+    expect(buildPersonaPrompt(PERSONAS.graham, { ...payload, valuation: v }).user).toContain(`VALUATION vs PEERS (sector-appropriate multiple · quality check · own history): ${v}`)
+    expect(buildPersonaPrompt(PERSONAS.graham, payload).user).toContain('VALUATION vs PEERS (sector-appropriate multiple · quality check · own history): n/a')
+  })
+})

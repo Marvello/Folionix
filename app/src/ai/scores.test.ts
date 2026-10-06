@@ -114,3 +114,33 @@ describe('computeAnalystScores', () => {
     expect(withoutNews.composite).toBe(Math.round(parts.reduce((a, p) => a + p.score, 0) / 3))
   })
 })
+
+describe('relativeValuationScore', () => {
+  const v = (peerDiff: number | null, peerVerdict: string, quality: string, ownDiff: number | null) => ({
+    ticker: 'X', lens: 'PB_ROE', multiple_name: 'P/B', value: 2,
+    peers: { count: 8, median: 1, diff: peerDiff, verdict: peerVerdict, tickers: [] },
+    quality: { name: 'ROE', value: 0.2, peer_median: 0.1, verdict: quality },
+    own: { avg: 2, years: 4, diff: ownDiff, verdict: 'in line' },
+    read: '', summary: '',
+  }) as never
+
+  it('rewards a discount and penalises a premium', async () => {
+    const { relativeValuationScore } = await import('./scores.js')
+    expect(relativeValuationScore(v(-0.4, 'discount', 'similar', null)).score).toBe(40)
+    expect(relativeValuationScore(v(0.4, 'premium', 'similar', null)).score).toBe(-40)
+  })
+  it('halves a gap that quality explains', async () => {
+    const { relativeValuationScore } = await import('./scores.js')
+    expect(relativeValuationScore(v(1.0, 'premium', 'stronger', null)).score).toBe(-25)
+  })
+  it('adds the pull from its own history', async () => {
+    const { relativeValuationScore } = await import('./scores.js')
+    expect(relativeValuationScore(v(0, 'on par', 'similar', -0.5)).score).toBe(20)
+  })
+  it('computeAnalystScores prefers the peer valuation over absolute bands', async () => {
+    const { computeAnalystScores } = await import('./scores.js')
+    const s = computeAnalystScores(snap({ pe: 8, pb: 0.9 }), ind(), null, v(0.4, 'premium', 'similar', null))
+    expect(s.valuation.score).toBe(-40)
+    expect(s.valuation.rationale).toContain('premium vs 8 peers')
+  })
+})

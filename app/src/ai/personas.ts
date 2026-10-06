@@ -35,6 +35,8 @@ export interface DeepRunPayload {
     current_ratio: number | null; free_cashflow: number | null
   } | null
   news: { score: number; themes: string | null; catalyst: string | null; risk: string | null } | null
+  /** 3-way sector-aware valuation summary (ai/valuation.ts), computed in code. */
+  valuation?: string | null
   [key: string]: unknown
 }
 
@@ -164,6 +166,7 @@ export function buildPersonaPrompt(
     `52W RANGE: ${fmt(payload.dist_from_high)}% from high, ${fmt(payload.dist_from_low)}% from low`,
     `FUNDAMENTALS: P/E ${fmt(payload.pe)}, P/B ${fmt(payload.pb)}, dividend yield ${fmt(payload.div_yield_pct)}%`,
     keyStatsLine(payload.key_stats),
+    `VALUATION vs PEERS (sector-appropriate multiple · quality check · own history): ${payload.valuation ?? 'n/a'}`,
     ``,
     `ANALYST SCORES (each -100 bearish .. +100 bullish):`,
     `- Technical ${s.technical.score}: ${s.technical.rationale}`,

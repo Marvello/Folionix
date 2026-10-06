@@ -174,4 +174,15 @@ describe('buildPrompt', () => {
     expect(src).toContain('TODO: eps')
     expect(src).toContain('TODO: debt_to_equity')
   })
+
+  it('adds the VALUATION block and a grounded DEEP sector comparison only when valuation is supplied', async () => {
+    const { buildPrompt } = await import('./prompts.js')
+    const v = 'P/E 10.7× · vs peers 10.0× (+8%, on par, n=8)'
+    const deep = buildPrompt(mockSnap, null, 'DEEP', undefined, { name: 'Indofood CBP', sector: 'Barang Konsumen Primer', industry: 'Makanan Olahan' }, null, v)
+    expect(deep).toContain(`- ${v}`)
+    expect(deep).toContain('Sector Comparison section using ONLY the VALUATION block')
+    expect(deep).toContain('Sector: Barang Konsumen Primer | Makanan Olahan')
+    expect(buildPrompt(mockSnap, null, 'LIGHT', undefined, undefined, null, v)).not.toContain('VALUATION')
+    expect(buildPrompt(mockSnap, null, 'DEEP')).not.toContain('Sector Comparison')
+  })
 })

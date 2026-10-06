@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, RefreshCw, ArrowLeftRight, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, ArrowLeftRight, Trash2, ChevronDown } from "lucide-react";
 import {
   insertPriceRefreshRequest, pollLatestSnapshotTime,
   insertStockTransaction, insertStockDividend, deactivatePosition,
@@ -17,6 +17,8 @@ import EmptyState from "@/components/EmptyState";
 import Modal, { ConfirmDialog } from "@/components/Modal";
 import { MiniSparkline } from "@/components/Sparkline";
 import Delta from "@/components/Delta";
+import PeerPanel from "@/components/PeerPanel";
+import type { PeerRow, Valuation } from "@/lib/peers";
 import SortTh from "@/components/SortTh";
 import { Field, Form, FormActions, PrimaryButton, inputCls, SecondaryButton, useAsyncAction } from "@/components/Form";
 import { useSort, compareBy } from "@/lib/useSort";
@@ -58,6 +60,8 @@ export default function PortfolioClient({
   history,
   dividends,
   initialBuy,
+  peers,
+  valuations,
 }: {
   positions: Position[];
   snaps: Snapshot[];
@@ -66,12 +70,24 @@ export default function PortfolioClient({
   dividends: StockDividend[];
   /** Plain ticker from `/stocks?buy=XXXX` (TickerDetail's Buy): opens the buy dialog prefilled. */
   initialBuy?: string;
+  /** stock_peers rows of active holdings (ticker = the holding), rank-ordered. */
+  peers: PeerRow[];
+  valuations: Valuation[];
 }) {
   const router = useRouter();
   const snapBy = new Map(snaps.map((s) => [s.ticker.toUpperCase(), s]));
   const recBy = new Map(recs.map((r) => [r.ticker.toUpperCase(), r.recommendation]));
   const posBy = new Map(positions.map((p) => [p.ticker.toUpperCase(), p]));
   const fresh = newestFetchedAt(snaps);
+  const valBy = new Map(valuations.map((v) => [v.ticker.toUpperCase(), v]));
+  const peersBy = new Map<string, PeerRow[]>();
+  for (const pr of peers) {
+    const t = pr.ticker.toUpperCase();
+    peersBy.set(t, [...(peersBy.get(t) ?? []), pr]);
+  }
+  // One expanded Peers row at a time keeps the table scannable.
+  const [openPeers, setOpenPeers] = useState<string | null>(null);
+  const togglePeers = (t: string) => setOpenPeers((cur) => (cur === t ? null : t));
 
   const incomeByTicker = new Map<string, number>();
   for (const d of dividends) {
@@ -316,7 +332,22 @@ export default function PortfolioClient({
                   <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-edge/50 pt-2 text-xs font-medium">
                     <SecondaryButton size="sm" onClick={() => setTradeModal({ ticker: t, editable: false, tab: "buy" })}>Trade</SecondaryButton>
                     <SecondaryButton size="sm" onClick={() => setRemoving(t)}>Remove</SecondaryButton>
+                    <SecondaryButton
+                      size="sm"
+                      className="ml-auto"
+                      aria-expanded={openPeers === t}
+                      aria-controls={`peers-m-${t}`}
+                      onClick={() => togglePeers(t)}
+                    >
+                      Peers
+                      <ChevronDown size={14} strokeWidth={1.5} aria-hidden className={`transition-transform duration-[120ms] ${openPeers === t ? "rotate-180" : ""}`} />
+                    </SecondaryButton>
                   </div>
+                  {openPeers === t && (
+                    <div id={`peers-m-${t}`} className="mt-2 border-t border-edge/50 pt-2">
+                      <PeerPanel valuation={valBy.get(t)} peers={peersBy.get(t) ?? []} snapBy={snapBy} />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -349,8 +380,10 @@ export default function PortfolioClient({
                   const pnl = cur && avg ? calcPnl(cur, avg, lots).pnlPct : null;
                   const realized = p.realized_pnl;
                   const income = incomeByTicker.get(t) ?? 0;
+                  const open = openPeers === t;
                   return (
-                    <tr key={t} className="border-t border-edge">
+                    <Fragment key={t}>
+                    <tr className="border-t border-edge">
                       <td className="py-2 pr-4">
                         <Link href={`/stocks?ticker=${displayTicker(t)}`} className="font-medium text-accent hover:underline">{displayTicker(t)}</Link>
                       </td>
@@ -372,6 +405,17 @@ export default function PortfolioClient({
                         <div className="flex justify-end gap-2">
                           <button
                             type="button"
+                            onClick={() => togglePeers(t)}
+                            aria-expanded={open}
+                            aria-controls={`peers-d-${t}`}
+                            title="Peer valuation"
+                            aria-label={`Peers of ${displayTicker(t)}`}
+                            className="rounded p-1 text-tdim hover:bg-component hover:text-tprimary"
+                          >
+                            <ChevronDown size={15} strokeWidth={1.5} className={`transition-transform duration-[120ms] ${open ? "rotate-180" : ""}`} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => setTradeModal({ ticker: t, editable: false, tab: "buy" })}
                             title="Buy / Sell / Dividend"
                             aria-label={`Trade ${displayTicker(t)}`}
@@ -391,6 +435,14 @@ export default function PortfolioClient({
                         </div>
                       </td>
                     </tr>
+                    {open && (
+                      <tr id={`peers-d-${t}`}>
+                        <td colSpan={COLUMNS.length + 1} className="bg-component/40 px-3 pb-4 pt-2">
+                          <PeerPanel valuation={valBy.get(t)} peers={peersBy.get(t) ?? []} snapBy={snapBy} />
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>

@@ -9,6 +9,7 @@ export default function Delta({
   paren = false,
   glyph = true,
   empty = "—",
+  neutral = false,
   className = "",
 }: {
   value: number | null | undefined;
@@ -19,6 +20,8 @@ export default function Delta({
   /** Hide the glyph when a sibling Delta in the same cell already shows it. */
   glyph?: boolean;
   empty?: string;
+  /** Direction without good/bad colour — e.g. a valuation premium is neither a gain nor a loss. */
+  neutral?: boolean;
   className?: string;
 }) {
   if (value == null || !Number.isFinite(value)) {
@@ -26,7 +29,7 @@ export default function Delta({
   }
   const text = fmtSigned(value, fmt);
   const flat = text === fmt(0);
-  const color = flat ? "text-tmuted" : value > 0 ? "text-up" : "text-down";
+  const color = flat || neutral ? "text-tmuted" : value > 0 ? "text-up" : "text-down";
   return (
     <span className={`num whitespace-nowrap ${color} ${className}`}>
       {glyph && <span aria-hidden>{flat ? "◆" : dirGlyph(value)} </span>}

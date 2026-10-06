@@ -5,6 +5,7 @@ import WatchlistClient from "@/components/WatchlistClient";
 import AccountChargesClient from "@/components/AccountChargesClient";
 import TickerDetail from "@/components/TickerDetail";
 import { priceHistory } from "@/lib/history";
+import type { PeerRow, Valuation } from "@/lib/peers";
 
 export default async function StocksPage({
   searchParams,
@@ -15,13 +16,28 @@ export default async function StocksPage({
   if (ticker) return <TickerDetail ticker={ticker} backHref="/stocks" tab={tab} />;
 
   const pool = getPool();
-  const [posRes, snapRes, anaRes, watchRes, divRes, chgRes] = await Promise.all([
+  const [posRes, snapRes, anaRes, watchRes, divRes, chgRes, peerRes, valRes] = await Promise.all([
     pool.query("SELECT * FROM portfolio_positions WHERE active = true ORDER BY ticker"),
     pool.query("SELECT * FROM latest_snapshots"),
     pool.query("SELECT ticker, recommendation FROM latest_analyses"),
     pool.query("SELECT * FROM watchlist ORDER BY added_at"),
     pool.query("SELECT * FROM stock_dividends ORDER BY paid_at DESC"),
     pool.query("SELECT * FROM account_charges ORDER BY charged_at DESC"),
+    // Peer groups of active holdings, with each peer's name + key stats (price/day % come from snapshots).
+    pool.query(
+      `SELECT p.ticker, p.peer, p.rank, p.basis, p.group_name, c.name,
+              k.market_cap, k.trailing_pe, k.price_to_book, k.total_revenue, k.ebitda, k.total_debt, k.total_cash,
+              k.return_on_equity, k.earnings_growth, k.revenue_growth, k.ebitda_margins
+         FROM stock_peers p
+         LEFT JOIN stock_classification c ON c.ticker = p.peer
+         LEFT JOIN stock_key_stats k ON k.ticker = p.peer
+        WHERE p.ticker IN (SELECT ticker FROM portfolio_positions WHERE active = true)
+        ORDER BY p.ticker, p.rank`,
+    ),
+    pool.query(
+      `SELECT ticker, computed_at, result FROM stock_valuation
+        WHERE ticker IN (SELECT ticker FROM portfolio_positions WHERE active = true)`,
+    ),
   ]);
 
   const positions = posRes.rows as Position[];
@@ -38,6 +54,8 @@ export default async function StocksPage({
         history={history}
         dividends={divRes.rows as StockDividend[]}
         initialBuy={buy}
+        peers={peerRes.rows as PeerRow[]}
+        valuations={valRes.rows as Valuation[]}
       />
       <WatchlistClient
         watch={watch}

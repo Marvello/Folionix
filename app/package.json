@@ -16,7 +16,8 @@
     "build": "node build.mjs",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint",
-    "migrate": "tsx src/db/migrate.ts"
+    "migrate": "tsx src/db/migrate.ts",
+    "peers": "tsx src/services/peers.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4",
