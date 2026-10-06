@@ -20,7 +20,7 @@ Two nodes: `analyze` then `send_alerts`. For each ticker in the batch:
    AFTER_HOURS → DEEP, MAJOR signal → FULL, else LIGHT).
 4. `process_output` → clean, `extract_recommendation`, duplicate-suppress via
    `alerts.evaluate_alert`, save [llm_analyses](../tables/llm-analyses.md).
-5. `send_alerts` posts to Telegram when `GRAPH_SEND_TELEGRAM` is true.
+5. Telegram alerts are sent from the pipelines themselves (spike route only, gated by `SEND_TELEGRAM`).
 
 Wraps the same primitives as [portfolio-analysis](portfolio-analysis.md) as
 graph nodes.

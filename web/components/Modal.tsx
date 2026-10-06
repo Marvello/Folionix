@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 
 // Brand dialog. A solid dark scrim (no blur — no glassmorphism), a flat
@@ -68,5 +68,61 @@ export default function Modal({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * Confirmation for an irreversible action. Reuses the brand dialog; focus
+ * lands on the close button, so Enter never confirms by accident.
+ */
+export function ConfirmDialog({
+  title,
+  message,
+  confirmLabel = "Remove",
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  message: React.ReactNode;
+  confirmLabel?: string;
+  onConfirm: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function confirm() {
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title={title} onClose={onClose}>
+      <p className="text-sm text-tsecondary">{message}</p>
+      {error && <p role="alert" className="mt-3 text-sm text-critical">{error}</p>}
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          onClick={confirm}
+          disabled={busy}
+          className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down hover:bg-page disabled:opacity-60"
+        >
+          {busy ? "Removing…" : confirmLabel}
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="inline-flex h-10 items-center rounded-sm border border-edge px-4 text-sm text-tmuted hover:text-tprimary disabled:opacity-60"
+        >
+          Cancel
+        </button>
+      </div>
+    </Modal>
   );
 }

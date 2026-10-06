@@ -24,10 +24,12 @@ PostgREST, no backend API between the web app and the database.
 
 - **`schema.sql`** — the full, idempotent schema: tables, views, RPC. Apply
   this first on a fresh database. It **is** the consolidated result of
-  migrations `001`–`036` and registers all of them in `schema_migrations`.
-- **`migrations/NNN_name.sql`** — incremental schema changes, applied **manually
-  in numeric order** (`psql`). There is no runner and no code path that applies
-  them — never apply a migration from app code or tests.
+  migrations `001`–`039` and registers all of them in `schema_migrations`.
+- **`migrations/NNN_name.sql`** — incremental schema changes, applied
+  **automatically at service startup** by `app/src/db/migrate.ts` (advisory-locked,
+  one transaction per file, `npm run migrate -- --check` to report). Files must not
+  contain their own BEGIN/COMMIT. CI applies `schema.sql` + all migrations to a
+  throwaway Postgres on every push.
 
 > **Never replay `001`–`036` on a fresh database.** Migrations `003`–`033`
 > predate `035_drop_rls` and still carry Supabase-only constructs — `create

@@ -20,6 +20,7 @@ colors:
   on-background: "#E2E8F0"
   on-surface: "#E2E8F0"
   on-surface-variant: "#94A3B8"
+  on-surface-dim: "#8291A7"
   ink: "#0F172A"
   # Market semantics
   gain: "#34D399"
@@ -168,7 +169,7 @@ A dark-first system organized by **who is speaking**: the product, the market, o
 - **Gain** {colors.gain} and **Loss** {colors.loss} are the market speaking. Loss is deliberately **amber, not red** — a portfolio dip is information, not an emergency. Reserve true alarm for true system failure.
 - **Critical** {colors.critical} is the only red in the system. It appears exclusively for system errors and breached user-set thresholds — a failed sync, a stale feed — never for an ordinary down day.
 - **Signal** {colors.signal} — violet — is the machine's voice. Anything model-generated (projections, insights, anomaly flags) wears violet so the user can always tell a fact from an opinion.
-- **On-surface** {colors.on-surface} carries primary text; **on-surface-variant** {colors.on-surface-variant} handles metadata, captions, and unchanged values.
+- **On-surface** {colors.on-surface} carries primary text; **on-surface-variant** {colors.on-surface-variant} handles metadata, captions, and unchanged values. **On-surface-dim** {colors.on-surface-dim} is the dimmest text allowed (column headers, 11px freshness tags) — it is the lowest grey that still clears WCAG AA 4.5:1 on background, surface and outline. Slate `#64748B` is non-text only (decorative hairlines), never text.
 
 ## Typography
 
@@ -178,6 +179,8 @@ Three families, each with one job. The split between **structure** (Space Grotes
 - **Inter** is the UI workhorse for labels, body, and controls {typography.body-md}, {typography.headline-md}. It disappears, which is the point.
 - **JetBrains Mono** renders **every financial figure, without exception** {typography.data-lg}, {typography.data-md}. Tabular numerals (`tnum`) are mandatory so digits align in columns and the eye can scan a ledger vertically. A number in a proportional font is a bug.
 - Currency is always written with an explicit code — `IDR 12,450,000`, never a bare symbol — so a multi-currency portfolio is never ambiguous.
+- One number locale everywhere (en-US: comma thousands, dot decimals) for money, compact (`IDR 1.23M`), counts and percents — never mix `1.234,50` and `1,234.50` on one screen.
+- Deltas are always signed and the sign leads the code: `+IDR 1,234`, `-IDR 1,234`, `+2.5%`. A value that rounds to zero carries no sign and reads neutral ◆. In code: `fmtSigned` + `<Delta>` (`web/lib/format.ts`, `web/components/Delta.tsx`) — never hand-build `x >= 0 ? "+" : ""`.
 
 ## Layout
 
@@ -311,6 +314,7 @@ Single-level flat nav — no groups, no collapsible sections:
 | Funds | `/funds` |
 | Bonds | `/bonds` |
 | News | `/news` |
+| Reviews | `/reviews` |
 
 Ticker detail lives at `/stocks?ticker=BBCA`. `TickerDetail` takes `backHref="/stocks"`.
 
@@ -318,11 +322,23 @@ Ticker detail lives at `/stocks?ticker=BBCA`. `TickerDetail` takes `backHref="/s
 
 ## Product Allocation Colors
 
-Used in the dashboard By Product bar chart and table dots. Always applied via `style={{ backgroundColor: hex }}` (not dynamic Tailwind classes, which get purged).
+Used in the dashboard By Product bar chart and table dots. These are **non-semantic** identity colors: they must never coincide with gain (green), loss (amber), signal (violet), critical (red) or Folio Teal, or an allocation segment would read as a market state or model output. Defined once as `--color-product-*` in `web/app/globals.css` and applied via `style={{ backgroundColor: "var(--color-product-…)" }}` (not dynamic Tailwind classes, which get purged).
 
-| Product | Hex |
-|---|---|
-| Stocks | `#22d3ee` |
-| Gold | `#fbbf24` |
-| Bonds | `#a78bfa` |
-| Funds | `#34d399` |
+| Product | Token | Hex |
+|---|---|---|
+| Stocks | `--color-product-stocks` | `#60a5fa` |
+| Gold | `--color-product-gold` | `#e5d3a1` |
+| Bonds | `--color-product-bonds` | `#cbd5e1` |
+| Funds | `--color-product-funds` | `#f472b6` |
+
+---
+
+## Accessibility & Interaction Rules
+
+- **Focus:** one global `:focus-visible` ring — 2px Folio Teal, 2px offset. Never `outline: none` without that replacement.
+- **Sortable headers:** a `<button>` inside the `<th>` plus `aria-sort` on the active column (`web/components/SortTh.tsx` + `web/lib/useSort.ts`). No `onClick` on a bare `<th>`.
+- **Irreversible actions** (remove a position, watchlist item, charge, purchase) always confirm first — `ConfirmDialog` in `web/components/Modal.tsx`, or an inline confirm inside the edit dialog. Destructive actions use the loss amber outline, never Critical red (red = system errors only).
+- **Errors from a dialog render inside that dialog** with `role="alert"` (`FormActions` in `web/components/Form.tsx`), never behind the scrim.
+- **Forms** are real `<form>` elements so Enter submits; build them from `Field` / `PrimaryButton` / `FormActions` / `inputCls` in `web/components/Form.tsx`.
+- **Tooltips / hover details** must also open on keyboard focus and tap (e.g. the activity calendar's event days are buttons).
+- **Error pages** (`app/error.tsx`, `app/global-error.tsx`) never render `error.message` — log it and show neutral copy plus the digest.

@@ -1,15 +1,15 @@
 import 'dotenv/config'
 import {
-  loadPortfolio, saveSnapshot, getLatestSnapshot, saveAnalysis, getLatestAnalysis,
+  loadPortfolio, saveSnapshot, getLatestSnapshot, saveAnalysis, getLatestAnalysis, getLastAlertedAnalysis,
   getWatchlist, getSnapshotSeries, getSnapshotPrice,
 } from '../db/db'
 import { computeIndicators, toDailySeries, type Indicators } from '../ai/indicators'
 import { fetchStock } from '../providers/market'
-import { fetchNewsForTicker, summarizeNewsWithLlm } from './news'
-import { callLlm, extractRecommendation, cleanForTelegram } from '../ai/llm'
+import { getNewsSentiment } from './news'
+import { callLlmWithModel, extractRecommendation, cleanForTelegram, HELD_RECOMMENDATIONS, WATCHLIST_RECOMMENDATIONS } from '../ai/llm'
 import { buildPrompt } from '../ai/prompts'
 import { sendTelegram } from '../telegram/client'
-import { evaluateAlert, shouldReanalyze } from '../telegram/alerts'
+import { ALERT_FOOTER, evaluateAlert, shouldReanalyze } from '../telegram/alerts'
 import { normalizeTicker } from '../../../lib/format'
 import { mapPool } from '../utils/mapPool.js'
 
@@ -28,7 +28,9 @@ const NO_TELEGRAM = process.argv.includes('--no-telegram') || !SEND_TELEGRAM
 // and trip their rate limits.
 const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROVIDER_CONCURRENCY) || 4)
 
-export async function runPriceRefresh(tickers?: string[]): Promise<void> {
+export async function runPriceRefresh(rawTickers?: string[]): Promise<void> {
+  // Keys are yahoo symbols; accept plain codes too (CLI: `npm run prices -- BBCA`).
+  const tickers = rawTickers?.map(normalizeTicker)
   const portfolio = await loadPortfolio()
   const wl = await getWatchlist()
 
@@ -69,11 +71,24 @@ export async function runPriceRefresh(tickers?: string[]): Promise<void> {
 
 /** Daily technical indicators from our own snapshot history (+ IHSG relative
  *  strength when ^JKSE snapshots exist). Best-effort — null on any failure. */
+// The IHSG benchmark series is identical for every ticker in a run; load it once
+// per few minutes instead of once per ticker.
+const JKSE_TTL_MS = 5 * 60_000
+let jkseSeries: { at: number; p: ReturnType<typeof getSnapshotSeries> } | null = null
+function getJkseSeries(): ReturnType<typeof getSnapshotSeries> {
+  if (!jkseSeries || Date.now() - jkseSeries.at > JKSE_TTL_MS) {
+    const p = getSnapshotSeries('^JKSE')
+    p.catch(() => { jkseSeries = null })   // don't cache a failure
+    jkseSeries = { at: Date.now(), p }
+  }
+  return jkseSeries.p
+}
+
 export async function computeTickerIndicators(jk: string): Promise<Indicators | null> {
   try {
     const [series, idxSeries] = await Promise.all([
       getSnapshotSeries(jk),
-      jk === '^JKSE' ? Promise.resolve([]) : getSnapshotSeries('^JKSE'),
+      jk === '^JKSE' ? Promise.resolve([]) : getJkseSeries(),
     ])
     const daily = toDailySeries(series)
     const idxDaily = toDailySeries(idxSeries)
@@ -111,34 +126,34 @@ async function analyzeOneTicker(
     return
   }
 
-  const [articles, indicators] = await Promise.all([
-    fetchNewsForTicker(jk, depth),
+  const [sentiment, indicators] = await Promise.all([
+    getNewsSentiment(jk, depth),
     computeTickerIndicators(jk),
   ])
-  const newsSentiment = articles.length > 0
-    ? await summarizeNewsWithLlm(articles, jk, depth)
-    : undefined
+  const newsSentiment = sentiment || undefined
 
   const prompt = buildPrompt(snap, null, depth, newsSentiment, undefined, indicators)
-  const raw = await callLlm(prompt)
+  // Temperature 0: this call decides the recommendation; sampling noise caused HOLD↔MONITOR alert churn.
+  const { text: raw, model } = await callLlmWithModel(prompt, { temperature: 0 })
   const cleanHtml = cleanForTelegram(raw)
-  const recommendation = extractRecommendation(raw)
+  const recommendation = extractRecommendation(raw, avgPrice ? HELD_RECOMMENDATIONS : WATCHLIST_RECOMMENDATIONS)
 
-  const alertEval = evaluateAlert(prevAnalysis, recommendation, new Date())
+  // Dedup against the last alert actually delivered, not the latest analysis: a
+  // failed send or a silent baseline must not suppress the next real alert.
+  const alertEval = evaluateAlert(await getLastAlertedAnalysis(jk), recommendation, new Date())
   // 'silent': never alert (scheduled baselines). 'spike' (signal-triggered)
   // and 'dedup' (manual runs) both alert only when the recommendation changed
   // or the WIB day rolled over — repeating an unchanged verdict is noise.
-  const sent = !NO_TELEGRAM && alerts !== 'silent' && !alertEval.isSame
+  // UNKNOWN = the model skipped or garbled its REKOMENDASI line: store it, never alert on it.
+  const shouldSend = !NO_TELEGRAM && alerts !== 'silent' && !alertEval.isSame && recommendation !== 'UNKNOWN'
+  const header = `<b>${jk.replace('.JK', '')}</b> — ${recommendation}\n\n`
+  const sent = shouldSend && await sendTelegram(header + cleanHtml + ALERT_FOOTER)
 
-  if (sent) {
-    const header = `<b>${jk.replace('.JK', '')}</b> — ${recommendation}\n\n`
-    await sendTelegram(header + cleanHtml)
-  }
-
-  await saveAnalysis(snapshotId, jk, process.env.LLM_MODEL ?? 'unknown', raw, cleanHtml, recommendation, sent, alertEval.isSame)
+  await saveAnalysis(snapshotId, jk, model, raw, cleanHtml, recommendation, sent, alertEval.isSame)
 }
 
-export async function runPortfolioPipeline(tickers?: string[], depth: Depth = 'FULL', alerts: AlertMode = 'dedup'): Promise<void> {
+export async function runPortfolioPipeline(rawTickers?: string[], depth: Depth = 'FULL', alerts: AlertMode = 'dedup'): Promise<void> {
+  const tickers = rawTickers?.map(normalizeTicker)
   const portfolio = await loadPortfolio()
   const entries = tickers
     ? Object.entries(portfolio).filter(([t]) => tickers.includes(t))
@@ -188,11 +203,11 @@ export async function runWatchlistPipeline(alerts: AlertMode = 'dedup'): Promise
 if (process.argv[1]?.endsWith('portfolio.ts') || process.argv[1]?.endsWith('portfolio.js')) {
   const positional = process.argv.slice(2).filter(a => !a.startsWith('--'))
 
-  if (process.argv.includes('--prices')) {
-    runPriceRefresh(positional.length ? positional : undefined).catch(console.error)
-  } else if (process.argv.includes('--watchlist')) {
-    runWatchlistPipeline().catch(console.error)
-  } else {
-    runPortfolioPipeline(positional.length ? positional : undefined).catch(console.error)
-  }
+  const run = process.argv.includes('--prices') ? runPriceRefresh(positional.length ? positional : undefined)
+    : process.argv.includes('--watchlist') ? runWatchlistPipeline()
+    : runPortfolioPipeline(positional.length ? positional : undefined)
+  run.catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
 }

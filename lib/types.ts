@@ -298,6 +298,7 @@ export interface AnalysisJobRow {
   created_at?: string
   started_at?: string | null
   finished_at?: string | null
+  retry_at?: string | null
 }
 
 // Persona analysis row (mirrors persona_analyses table)

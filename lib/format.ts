@@ -74,19 +74,29 @@ export function wibDateOffset(days: number): string {
   return d.toLocaleDateString('en-CA', { timeZone: WIB })
 }
 
-const ALLOWED_TAGS = new Set(['b', 'i', 'u', 's', 'code', 'pre', 'a', 'br'])
+// ── HTML ──
+/** Escape text for HTML / Telegram HTML mode. Existing entities are kept, so it is idempotent. */
+export function escapeHtml(s: string): string {
+  return s
+    .replace(/&(?!(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);)/gi, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
 
+/**
+ * Allowlist sanitizer for LLM output (Telegram + dashboard `dangerouslySetInnerHTML`).
+ * Output contains only bare <b> <i> <u> <s> <code> <pre> tags — never attributes — and
+ * everything else is escaped text. Idempotent, so already-stored HTML can be re-sanitized.
+ */
 export function sanitizeHtml(html: string): string {
-  let result = html
-  // First, remove disallowed tags with their content
-  result = result.replace(/<([a-z][a-z0-9]*)\b[^>]*>[\s\S]*?<\/\1>/gi, (match, tag: string) => {
-    return ALLOWED_TAGS.has(tag.toLowerCase()) ? match : ''
-  })
-  // Then, remove any remaining disallowed tags (self-closing, br, etc.)
-  result = result.replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (match, tag: string) => {
-    return ALLOWED_TAGS.has(tag.toLowerCase()) ? match : ''
-  })
-  return result
+  const stripped = html
+    .replace(/<(script|style|iframe|object|embed|template)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi, (m, tag: string) =>
+      /^(b|i|u|s|code|pre)$/i.test(tag) ? m : '')
+  return escapeHtml(stripped).replace(
+    /&lt;(\/?)(b|i|u|s|code|pre)\b(?:(?!&gt;)[\s\S])*&gt;/gi,
+    (_m, slash: string, tag: string) => `<${slash}${tag.toLowerCase()}>`,
+  )
 }
 
 export function valueHolding(

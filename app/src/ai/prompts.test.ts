@@ -4,7 +4,7 @@ import type { StockSnapshotRow } from '../../../lib/types'
 const mockSnap: StockSnapshotRow = {
   ticker: 'BBCA.JK', current_price: 9600, day_change: 100, day_change_pct: 1.05,
   high_52w: 10200, low_52w: 8400,
-  market_cap_raw: 1.15e14, pe: 15.3, pb: 2.2, div_yield_pct: 0.031,
+  market_cap_raw: 1.15e14, pe: 15.3, pb: 2.2, div_yield_pct: 3.1,
   volume: 12_000_000,
   lots: 10, avg_price: 9000, unrealized_pnl: 600, unrealized_pnl_pct: 6.67, total_pnl: 600_000,
 }
@@ -56,6 +56,11 @@ describe('buildPrompt', () => {
     expect(prompt).not.toContain('FUNDAMENTALS')
   })
 
+  it('prints the stored dividend percent as-is', async () => {
+    const { buildPrompt } = await import('./prompts.js')
+    expect(buildPrompt(mockSnap, null, 'FULL')).toContain('3.10%')
+  })
+
   it('includes fundamentals block for FULL depth', async () => {
     const { buildPrompt } = await import('./prompts.js')
     const prompt = buildPrompt(mockSnap, null, 'FULL')
@@ -64,10 +69,23 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('P/B')
   })
 
-  it('includes sector comparison instruction for DEEP depth', async () => {
+  it('never asks for data it does not supply, and forbids inventing figures', async () => {
     const { buildPrompt } = await import('./prompts.js')
     const prompt = buildPrompt(mockSnap, null, 'DEEP')
-    expect(prompt).toContain('Sector Comparison')
+    expect(prompt).not.toContain('Sector Comparison')
+    expect(prompt).toContain('GROUNDING RULES')
+  })
+
+  it('renders missing data as N/A, and a watchlist ticker is not "BREAKEVEN"', async () => {
+    const { buildPrompt } = await import('./prompts.js')
+    const prompt = buildPrompt(
+      { ...mockSnap, high_52w: null, low_52w: null, avg_price: 0, lots: 0, unrealized_pnl_pct: null },
+      null, 'FULL',
+    )
+    expect(prompt).toContain('52W High : N/A | 52W Low: N/A')
+    expect(prompt).not.toContain('Rp 0')
+    expect(prompt).not.toContain('BREAKEVEN')
+    expect(prompt).toContain('👀 WATCHLIST')
   })
 
   it('includes investor position block when avg_price is set', async () => {

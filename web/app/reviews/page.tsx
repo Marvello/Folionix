@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { ArrowLeft, ChevronRight, Mail } from "lucide-react";
 import { getPool } from "@/lib/db";
-import { fmtIdr, fmtWibDate } from "@/lib/format";
+import { fmtIdr, fmtPctAbs, fmtWibDate } from "@/lib/format";
+import Delta from "@/components/Delta";
 import type { WeeklyReview } from "@/lib/types";
 import MarkdownView from "@/components/MarkdownView";
 import CopyButton from "@/components/CopyButton";
 import EmptyState from "@/components/EmptyState";
 
-const pctStr = (n: number | null | undefined): string =>
-  n == null ? "N/A" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 
 export default async function ReviewsPage({
   searchParams,
@@ -92,7 +91,7 @@ export default async function ReviewsPage({
                   <span className="text-tdim">Net Worth</span>
                   <span className="num text-right text-tprimary">{r.stats?.net_worth != null ? fmtIdr(r.stats.net_worth) : "N/A"}</span>
                   <span className="text-tdim">WoW</span>
-                  <span className={`num text-right ${wow == null ? "text-tdim" : wow >= 0 ? "text-up" : "text-down"}`}>{pctStr(wow)}</span>
+                  <span className="text-right"><Delta value={wow} fmt={fmtPctAbs(2)} empty="N/A" /></span>
                   <span className="text-tdim">Accuracy</span>
                   <span className="num text-right text-tprimary">
                     {r.stats?.accuracy_pct != null ? `${r.stats.accuracy_pct.toFixed(0)}% (n=${r.stats.accuracy_n ?? 0})` : "—"}
@@ -135,9 +134,7 @@ export default async function ReviewsPage({
                       {r.stats?.net_worth != null ? fmtIdr(r.stats.net_worth) : "N/A"}
                     </td>
                     <td className="num py-2 pr-6 text-right">
-                      <span className={wow == null ? "text-tdim" : wow >= 0 ? "text-up" : "text-down"}>
-                        {pctStr(wow)}
-                      </span>
+                      <Delta value={wow} fmt={fmtPctAbs(2)} empty="N/A" />
                     </td>
                     <td className="num py-2 pr-6 text-right">{r.stats?.rec_changed ?? "—"}</td>
                     <td className="num py-2 pr-6 text-right">

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { getPool } from "@/lib/db";
-import { fmtIdr, fmtWib, fmtWibDate, fmtAgo, dirGlyph, newsCutoffIso, normalizeTicker, displayTicker } from "@/lib/format";
+import { fmtIdr, fmtNum, fmtPctAbs, fmtWib, fmtWibDate, fmtAgo, newsCutoffIso, normalizeTicker, displayTicker } from "@/lib/format";
 import type {
   Position, Snapshot, Analysis, NewsRow, AccuracyRow, StockTransaction, StockDividend,
   StockKeyStatsRow, StockFinancialRow, CorporateActionRow,
@@ -9,6 +9,8 @@ import type {
 import PriceChart from "@/components/PriceChart";
 import AnalysisNewsPanels from "@/components/AnalysisNewsPanels";
 import DetailTabs from "@/components/DetailTabs";
+import Delta from "@/components/Delta";
+import RecommendationBadge from "@/components/RecommendationBadge";
 import KeyStats from "@/components/KeyStats";
 import FinancialsTable from "@/components/FinancialsTable";
 import CorporateActions from "@/components/CorporateActions";
@@ -17,12 +19,11 @@ import { positionMetrics } from "@/lib/position";
 import { mergeTxnLedger, type LedgerEntry } from "@/lib/ledger-view";
 import { resolveTab } from "@/lib/tabs";
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: "up" | "down" | null }) {
-  const color = tone === "up" ? "text-up" : tone === "down" ? "text-down" : "text-tprimary";
+function Metric({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div>
       <div className="text-xs text-tdim">{label}</div>
-      <div className={`num mt-0.5 text-sm font-semibold ${color}`}>{value}</div>
+      <div className="num mt-0.5 text-sm font-semibold text-tprimary">{value}</div>
     </div>
   );
 }
@@ -106,23 +107,18 @@ export default async function TickerDetail({
             <span className="rounded-full border border-edge px-2 py-0.5 text-xs text-tmuted">Watching · not held</span>
           )}
           {!held && (
-            <Link href="/stocks" className="rounded-md border border-edge px-2.5 py-1 text-xs text-accent hover:text-tprimary">Buy</Link>
+            <Link href={`/stocks?buy=${displayTicker(t)}`} className="rounded-md border border-edge px-2.5 py-1 text-xs text-accent hover:text-tprimary">Buy</Link>
           )}
         </div>
         {latest && (
           <div className="mt-1 text-tsecondary">
             {latest.name ? `${latest.name} · ` : ""}
             <span className="num">{fmtIdr(latest.current_price)}</span>{" "}
-            {latest.day_change_pct != null && (
-              <span className={`num ${latest.day_change_pct >= 0 ? "text-up" : "text-down"}`}>
-                {dirGlyph(latest.day_change_pct)} {latest.day_change_pct >= 0 ? "+" : ""}
-                {latest.day_change_pct.toFixed(2)}%
-              </span>
-            )}
+            {latest.day_change_pct != null && <Delta value={latest.day_change_pct} fmt={fmtPctAbs(2)} />}
           </div>
         )}
         {latest?.fetched_at && (
-          <p className="mt-0.5 text-[11px] text-tdim">
+          <p className="mt-0.5 text-caption text-tdim">
             Price updated {fmtWib(latest.fetched_at)} ({fmtAgo(latest.fetched_at)}) · yfinance
           </p>
         )}
@@ -134,23 +130,19 @@ export default async function TickerDetail({
           <div className="rounded-lg border border-edge bg-component p-4">
             <div className="mb-4 border-b border-edge pb-4">
               <div className="text-xs text-tdim">Unrealized P&amp;L</div>
-              <div className={`num text-2xl font-semibold ${metrics.unrealizedPnl >= 0 ? "text-up" : "text-down"}`}>
-                {fmtIdr(metrics.unrealizedPnl)}
-                {metrics.unrealizedPct != null && (
-                  <span className="ml-2 text-base">
-                    {dirGlyph(metrics.unrealizedPct)} {metrics.unrealizedPct >= 0 ? "+" : ""}{metrics.unrealizedPct.toFixed(1)}%
-                  </span>
-                )}
+              <div className="text-2xl font-semibold">
+                <Delta value={metrics.unrealizedPnl} fmt={fmtIdr} />
+                {metrics.unrealizedPct != null && <Delta value={metrics.unrealizedPct} paren glyph={false} className="ml-2 text-base" />}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-              <Metric label="Lots" value={metrics.lots.toLocaleString("id-ID")} />
+              <Metric label="Lots" value={fmtNum(metrics.lots)} />
               <Metric label="Avg Cost" value={fmtIdr(metrics.avgPrice, 2)} />
               <Metric label="Cost Basis" value={fmtIdr(metrics.costBasis)} />
               <Metric label="Market Value" value={metrics.marketValue ? fmtIdr(metrics.marketValue) : "N/A"} />
-              <Metric label="Realized P&amp;L" value={fmtIdr(metrics.realized)} tone={metrics.realized >= 0 ? "up" : "down"} />
+              <Metric label="Realized P&amp;L" value={<Delta value={metrics.realized} fmt={fmtIdr} />} />
               <Metric label="Dividend Income" value={fmtIdr(metrics.income)} />
-              <Metric label="Total Return" value={fmtIdr(metrics.totalReturn)} tone={metrics.totalReturn >= 0 ? "up" : "down"} />
+              <Metric label="Total Return" value={<Delta value={metrics.totalReturn} fmt={fmtIdr} />} />
             </div>
           </div>
         </section>
@@ -194,8 +186,8 @@ export default async function TickerDetail({
                     {ledger.map((r) => (
                       <tr key={r.key} className="border-t border-edge">
                         <td className="py-2 pr-4 text-tmuted">{fmtWibDate(r.date)}</td>
-                        <td className={`py-2 pr-4 ${r.type === "SELL" ? "text-down" : r.type === "DIVIDEND" ? "text-up" : "text-tprimary"}`}>{LEDGER_LABEL[r.type]}</td>
-                        <td className="num py-2 pr-4 text-right">{r.lots == null ? "-" : r.lots.toLocaleString("id-ID")}</td>
+                        <td className={`py-2 pr-4 ${r.type === "DIVIDEND" ? "text-up" : "text-tprimary"}`}>{LEDGER_LABEL[r.type]}</td>
+                        <td className="num py-2 pr-4 text-right">{r.lots == null ? "-" : fmtNum(r.lots)}</td>
                         <td className="num py-2 pr-4 text-right">{r.price == null ? "-" : fmtIdr(r.price)}</td>
                         <td className="num py-2 pr-4 text-right text-tmuted">{r.fee == null ? "-" : fmtIdr(r.fee)}</td>
                         <td className="num py-2 text-right">{fmtIdr(r.amount)}</td>
@@ -215,29 +207,23 @@ export default async function TickerDetail({
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="text-left text-xs text-tdim">
-                      <th className="pb-1">WHEN</th>
-                      <th className="pb-1">REC</th>
-                      <th className="pb-1">CHANGE</th>
-                      <th className="pb-1">CORRECT</th>
+                    <tr className="text-xs font-semibold text-tdim">
+                      <th className="pb-2 pr-4 text-left">WHEN</th>
+                      <th className="pb-2 pr-4 text-left">REC</th>
+                      <th className="pb-2 pr-4 text-right">CHANGE</th>
+                      <th className="pb-2 text-left">OUTCOME</th>
                     </tr>
                   </thead>
                   <tbody>
                     {accuracy.map((r, i) => (
                       <tr key={i} className="border-t border-edge">
-                        <td className="py-1">{fmtWibDate(r.analysed_at)}</td>
-                        <td className="py-1">{r.recommendation}</td>
-                        <td className={`num py-1 ${(r.actual_change_pct ?? 0) >= 0 ? "text-up" : "text-down"}`}>
-                          {r.actual_change_pct == null ? "-" : `${dirGlyph(r.actual_change_pct)} ${r.actual_change_pct}%`}
+                        <td className="py-2 pr-4 text-tmuted">{fmtWibDate(r.analysed_at)}</td>
+                        <td className="py-2 pr-4"><RecommendationBadge rec={r.recommendation} /></td>
+                        <td className="num py-2 pr-4 text-right">
+                          <Delta value={r.actual_change_pct} fmt={fmtPctAbs(2)} empty="-" />
                         </td>
-                        <td className="py-1">
-                          {r.correct == null ? (
-                            "-"
-                          ) : r.correct ? (
-                            <span className="text-up">Correct</span>
-                          ) : (
-                            <span className="text-down">Miss</span>
-                          )}
+                        <td className="py-2 text-tsecondary">
+                          {r.correct == null ? <span className="text-tdim">-</span> : r.correct ? "✓ Correct" : "✗ Miss"}
                         </td>
                       </tr>
                     ))}

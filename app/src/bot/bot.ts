@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import { Bot, Context } from 'grammy'
 import {
-  loadPortfolio, upsertPosition, deactivatePosition, getAllPositions,
+  loadPortfolio, addStockTransaction, deactivatePosition, getAllPositions,
 } from '../db/db'
 import { loadWatchlist, addToWatchlist, removeFromWatchlist } from '../services/watchlist'
 import { listGoldHoldings, addGoldPurchase, deactivateGoldPurchase } from '../services/gold'
@@ -11,10 +11,11 @@ import { refreshForexRates } from '../services/forex'
 import { runPortfolioPipeline, runPriceRefresh } from '../services/portfolio'
 import { runWeekReview } from '../services/weekReview'
 import { fetchGoldPrices } from '../providers/cermati'
-import { displayTicker, fmtIdr, fmtCap, normalizeTicker } from '../../../lib/format'
+import { displayTicker, escapeHtml, fmtIdr, fmtCap, normalizeTicker } from '../../../lib/format'
 import { runPendingMigrations } from '../db/migrate'
 
-const TICKER_RE = /^[A-Z0-9]{1,10}$/
+// IDX codes are 4 chars; 7 + '.JK' still fits the varchar(10) ticker columns.
+const TICKER_RE = /^[A-Z0-9]{1,7}$/
 
 export function validateTicker(raw: string): void {
   if (!TICKER_RE.test(raw.trim().toUpperCase())) {
@@ -28,7 +29,7 @@ export function validatePrice(n: number): void {
 }
 
 export function validateLots(n: number): void {
-  if (n < 1) throw new Error('LOTS must be >= 1')
+  if (!Number.isInteger(n) || n < 1) throw new Error('LOTS must be a whole number >= 1')
   if (n > 1_000_000) throw new Error('LOTS too large (max 1,000,000)')
 }
 
@@ -64,9 +65,21 @@ export async function startBot(): Promise<void> {
         await handler(ctx, args)
       } catch (err) {
         console.error('[bot] error:', err)
-        await ctx.reply('An error occurred. Check logs.')
+        await ctx.reply('An error occurred. Check logs.').catch(() => {})
       }
     }
+  }
+
+  // Long jobs run detached: grammy handles updates one at a time, so awaiting a
+  // multi-minute LLM pipeline would freeze every other command until it finished.
+  function detached(ctx: Context, label: string, work: () => Promise<string>): void {
+    work()
+      .then(msg => ctx.reply(msg, { parse_mode: 'HTML' }))
+      .catch(err => {
+        console.error(`[bot] ${label} failed:`, err)
+        return ctx.reply(`${label} failed. Check logs.`)
+      })
+      .catch(err => console.error(`[bot] ${label} reply failed:`, err))
   }
 
 // /status — show all active positions
@@ -82,57 +95,37 @@ bot.command('status', guard(async (ctx) => {
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
 
-// /add TICKER AVG_PRICE LOTS [NOTES]
+// /add TICKER PRICE LOTS [NOTES] — records a BUY in the stock_transactions ledger.
+// portfolio_positions is a trigger-maintained cache of that ledger, so it is never written directly.
 bot.command('add', guard(async (ctx, args) => {
   if (!args || args.length < 3) {
-    await ctx.reply('Usage: /add TICKER AVG_PRICE LOTS [NOTES]')
+    await ctx.reply('Usage: /add TICKER PRICE LOTS [NOTES] (records a BUY)')
     return
   }
-  const avgPrice = Number(args[1])
+  const price = Number(args[1])
   const lots = Number(args[2])
-  const notes = args.slice(3).join(' ') || null
-  if (isNaN(avgPrice) || isNaN(lots)) {
-    await ctx.reply('AVG_PRICE and LOTS must be numbers.')
+  const notes = args.slice(3).join(' ')
+  if (isNaN(price) || isNaN(lots)) {
+    await ctx.reply('PRICE and LOTS must be numbers.')
     return
   }
   try {
     validateTicker(args[0])
-    validatePrice(avgPrice)
+    validatePrice(price)
     validateLots(lots)
   } catch (err) {
     await ctx.reply(String(err instanceof Error ? err.message : err))
     return
   }
   const ticker = normalizeTicker(args[0])
-  await upsertPosition(ticker, avgPrice, lots, notes)
+  await addStockTransaction({ ticker, side: 'BUY', lots, price, fee: 0, txn_at: new Date().toISOString(), notes })
   await runPriceRefresh([ticker])
-  await ctx.reply(`Added ${ticker}: ${lots} lots @ ${fmtIdr(avgPrice)}`)
+  await ctx.reply(`Recorded BUY ${displayTicker(ticker)}: ${lots} lots @ ${fmtIdr(price)}`)
 }))
 
-// /update TICKER AVG_PRICE LOTS [NOTES]
-bot.command('update', guard(async (ctx, args) => {
-  if (!args || args.length < 3) {
-    await ctx.reply('Usage: /update TICKER AVG_PRICE LOTS [NOTES]')
-    return
-  }
-  const avgPrice = Number(args[1])
-  const lots = Number(args[2])
-  const notes = args.slice(3).join(' ') || null
-  if (isNaN(avgPrice) || isNaN(lots)) {
-    await ctx.reply('AVG_PRICE and LOTS must be numbers.')
-    return
-  }
-  try {
-    validateTicker(args[0])
-    validatePrice(avgPrice)
-    validateLots(lots)
-  } catch (err) {
-    await ctx.reply(String(err instanceof Error ? err.message : err))
-    return
-  }
-  const ticker = normalizeTicker(args[0])
-  await upsertPosition(ticker, avgPrice, lots, notes)
-  await ctx.reply(`Updated ${ticker}: ${lots} lots @ ${fmtIdr(avgPrice)}`)
+// /update — retired: avg price and lots are derived from the transaction ledger.
+bot.command('update', guard(async (ctx) => {
+  await ctx.reply('Positions are derived from transactions. Use /add to record a BUY, or edit transactions on the dashboard.')
 }))
 
 // /remove TICKER
@@ -149,7 +142,7 @@ bot.command('remove', guard(async (ctx, args) => {
   }
   const ticker = normalizeTicker(args[0])
   await deactivatePosition(ticker)
-  await ctx.reply(`Removed ${ticker} from portfolio.`)
+  await ctx.reply(`Hid ${displayTicker(ticker)} from the portfolio (it reappears on its next transaction).`)
 }))
 
 // /analyze [TICKER...]
@@ -162,10 +155,12 @@ bot.command('analyze', guard(async (ctx, args) => {
       return
     }
   }
-  await ctx.reply('Running analysis...')
+  await ctx.reply('Running analysis… I will reply when it is done.')
   const tickers = args && args.length > 0 ? args.map(normalizeTicker) : undefined
-  await runPortfolioPipeline(tickers)
-  await ctx.reply('Analysis complete.')
+  detached(ctx, 'Analysis', async () => {
+    await runPortfolioPipeline(tickers)
+    return 'Analysis complete.'
+  })
 }))
 
 // /wadd TICKER [NOTES]
@@ -211,7 +206,7 @@ bot.command('wlist', guard(async (ctx) => {
     await ctx.reply('Watchlist is empty.')
     return
   }
-  const lines = all.map(w => `${w.kind === 'ai_suggested' ? '🤖' : '👤'} <b>${displayTicker(w.ticker)}</b>${w.notes ? ' — ' + w.notes : ''}`)
+  const lines = all.map(w => `${w.kind === 'ai_suggested' ? '🤖' : '👤'} <b>${displayTicker(w.ticker)}</b>${w.notes ? ' — ' + escapeHtml(w.notes) : ''}`)
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
 
@@ -252,7 +247,7 @@ bot.command('glist', guard(async (ctx) => {
       ? `${fmtIdr(h.currentPrice ?? 0)}/g | ${fmtIdr(h.currentValue)} (${(h.unrealizedPnlPct ?? 0).toFixed(1)}%)`
       : 'price N/A'
     const realized = h.realizedPnl ? ` | realized ${fmtIdr(h.realizedPnl)}` : ''
-    return `<b>${h.venue}</b> ${h.grams}g — ${status}${realized}`
+    return `<b>${escapeHtml(h.venue)}</b> ${h.grams}g — ${status}${realized}`
   })
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
@@ -275,7 +270,7 @@ bot.command('gprice', guard(async (ctx) => {
     await ctx.reply('No gold prices available.')
     return
   }
-  const lines = Object.entries(prices).map(([v, p]) => `<b>${v}</b>: Buy ${fmtIdr(p.buy)}/g · Sell ${fmtIdr(p.sell)}/g`)
+  const lines = Object.entries(prices).map(([v, p]) => `<b>${escapeHtml(v)}</b>: Buy ${fmtIdr(p.buy)}/g · Sell ${fmtIdr(p.sell)}/g`)
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
 
@@ -289,7 +284,7 @@ bot.command('flist', guard(async (ctx) => {
   const lines = holdings.map(h => {
     const val = h.currentValue != null ? `${fmtIdr(h.currentValue)} (${(h.unrealizedPnlPct ?? 0).toFixed(1)}%)` : 'NAV N/A'
     const realized = h.realizedPnl ? ` | realized ${fmtIdr(h.realizedPnl)}` : ''
-    return `<b>${h.fundCode}</b> ${h.units} units — ${val}${realized}`
+    return `<b>${escapeHtml(h.fundCode)}</b> ${h.units} units — ${val}${realized}`
   })
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
@@ -301,7 +296,8 @@ bot.command('fxrefresh', guard(async (ctx) => {
     await refreshForexRates()
     await ctx.reply('✓ Forex rates updated.')
   } catch (err) {
-    await ctx.reply(`Failed: ${err instanceof Error ? err.message : String(err)}`)
+    console.error('[bot] fxrefresh failed:', err)
+    await ctx.reply('Forex refresh failed. Check logs.')
   }
 }))
 
@@ -313,7 +309,7 @@ bot.command('blist', guard(async (ctx) => {
     return
   }
   const lines = summaries.map(s =>
-    `<b>${s.holding.series_code}</b> ${fmtIdr(s.holding.principal)} | ${s.holding.coupon_rate}% p.a. | ${s.daysToMaturity}d left`
+    `<b>${escapeHtml(s.holding.series_code)}</b> ${fmtIdr(s.holding.principal)} | ${s.holding.coupon_rate}% p.a. | ${s.daysToMaturity}d left`
   )
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
@@ -321,20 +317,24 @@ bot.command('blist', guard(async (ctx) => {
 // /weekreview — generate the weekly portfolio + AI review on demand
 bot.command('weekreview', guard(async (ctx) => {
   await ctx.reply('Generating weekly review — this can take a few minutes…')
-  const result = await runWeekReview()
-  const wow = result.stats.wow_pct != null
-    ? `${result.stats.wow_pct >= 0 ? '+' : ''}${result.stats.wow_pct.toFixed(2)}%`
-    : 'N/A'
-  await ctx.reply(
-    `✓ Week review #${result.id} saved (${result.weekStart} → ${result.weekEnd}).\n` +
-    `Net worth ${fmtIdr(result.stats.net_worth)} (${wow} WoW). See dashboard → /reviews.`,
-    { parse_mode: 'HTML' },
-  )
+  detached(ctx, 'Weekly review', async () => {
+    const result = await runWeekReview()
+    const wow = result.stats.wow_pct != null
+      ? `${result.stats.wow_pct >= 0 ? '+' : ''}${result.stats.wow_pct.toFixed(2)}%`
+      : 'N/A'
+    return `✓ Week review #${result.id} saved (${result.weekStart} → ${result.weekEnd}).\n` +
+      `Net worth ${fmtIdr(result.stats.net_worth)} (${wow} WoW). See dashboard → /reviews.`
+  })
 }))
 
   await runPendingMigrations()
+  // Errors thrown outside guard (middleware, network) would otherwise stop polling.
+  bot.catch(err => console.error('[bot] unhandled update error:', err.error))
   console.log('[bot] starting long-polling...')
-  bot.start()
+  bot.start().catch((err: unknown) => {
+    console.error('[bot] polling stopped:', err)
+    process.exit(1)
+  })
 }
 
 if (process.argv[1]?.endsWith('bot.ts') || process.argv[1]?.endsWith('bot.js')) {

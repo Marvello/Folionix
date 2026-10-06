@@ -158,9 +158,8 @@ Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-
 |---------|-------------|
 | `/status` | Current portfolio P&L summary |
 | `/detail BBCA` | Detailed analysis for a ticker |
-| `/add BBCA 9500 10` | Add new position (ticker, avg price, lots) |
-| `/update BBCA 9200 15` | Update existing position |
-| `/remove BBCA` | Deactivate position |
+| `/add BBCA 9500 10` | Record a BUY (ticker, price, lots) in the transaction ledger |
+| `/remove BBCA` | Hide position (reappears on its next transaction) |
 | `/analyze BBCA` | Trigger on-demand LLM analysis |
 | `/portfolio` | Export portfolio as JSON |
 | `/accuracy` | Recommendation backtest results |

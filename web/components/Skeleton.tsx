@@ -1,5 +1,5 @@
 // Presentational loading placeholders streamed by route `loading.tsx` files
-// while server components await Supabase. No data, no client code.
+// while server components await Postgres. No data, no client code.
 
 const pulse = "animate-pulse rounded bg-edge";
 
@@ -10,7 +10,7 @@ export function SkeletonBlock({ className = "" }: { className?: string }) {
 /** Row of metric cards, mirrors components/MetricCard.tsx layout. */
 export function SkeletonCardRow({ count = 4 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+    <div className={`grid grid-cols-2 gap-3 sm:gap-4 ${count >= 5 ? "lg:grid-cols-5" : "md:grid-cols-4"}`}>
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="rounded-lg border border-edge bg-component p-4">
           <SkeletonBlock className="h-3 w-20" />
@@ -60,5 +60,19 @@ export function SkeletonList({ rows = 6 }: { rows?: number }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Product page placeholder (Funds/Bonds/Gold): heading + actions, cards, table. */
+export function SkeletonProductPage({ cards = 4, cols = 6 }: { cards?: number; cols?: number }) {
+  return (
+    <div className="space-y-4" aria-busy="true">
+      <div className="flex items-center justify-between">
+        <SkeletonBlock className="h-6 w-40" />
+        <SkeletonBlock className="h-10 w-28" />
+      </div>
+      <SkeletonCardRow count={cards} />
+      <SkeletonTable rows={6} cols={cols} />
+    </div>
   );
 }

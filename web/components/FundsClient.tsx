@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Minus, Receipt, RefreshCw } from "lucide-react";
 import {
@@ -11,12 +11,17 @@ import {
   deactivateFundPurchase,
   insertFundDistribution,
 } from "@/app/actions";
-import { fmtCurrency, fmtIdrCompact, fmtWib, fmtAgo, dirGlyph } from "@/lib/format";
+import { fmtCurrency, fmtIdrCompact, fmtNum, fmtSigned, fmtPctAbs, fmtWib, fmtAgo, dirGlyph, tone } from "@/lib/format";
 import type { FundPurchase, FundNav, FundCatalogItem, ForexRate, FundDistribution, FundHolding } from "@/lib/types";
 import { foldWeightedAvg, type LedgerLot } from "@folionix/lib";
 import MetricCard from "@/components/MetricCard";
 import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
+import Delta from "@/components/Delta";
+import SortTh from "@/components/SortTh";
+import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import { useSort, compareBy } from "@/lib/useSort";
+import { useRefetchPoll } from "@/lib/useRefetchPoll";
 import Pager from "@/components/Pager";
 import { usePaged } from "@/lib/usePaged";
 
@@ -123,39 +128,13 @@ export default function FundsClient({
   const [creating, setCreating] = useState(false);
   const [selling, setSelling] = useState(false);
   const [distributing, setDistributing] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [fundSort, setFundSort] = useState<{ col: string; dir: "asc" | "desc" }>({ col: "cost", dir: "desc" });
-  const [refreshing, setRefreshing] = useState(false);
+  const { sort: fundSort, toggle: toggleFundSort } = useSort({ col: "cost", dir: "desc" }, ["name"]);
   const [infoCode, setInfoCode] = useState<string | null>(null);
-
-  // Guard the refetch poll against firing after the component unmounts.
-  const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
-
-  async function refetchNavs() {
-    setRefreshing(true);
-    setErr(null);
-    const baseline = fresh;
-    await insertPriceRefreshRequest("fund");
-    const deadline = Date.now() + 30000;
-    const tick = async () => {
-      if (!alive.current) return;
-      const newest = await pollLatestFundNavTime();
-      const done = (newest && (!baseline || newest > baseline)) || Date.now() > deadline;
-      if (!alive.current) return;
-      if (done) {
-        router.refresh();
-        setRefreshing(false);
-        return;
-      }
-      setTimeout(tick, 2000);
-    };
-    setTimeout(tick, 2000);
-  }
-
-  function toggleFundSort(col: string) {
-    setFundSort((s) => ({ col, dir: s.col === col && s.dir === "desc" ? "asc" : "desc" }));
-  }
+  const { refreshing, status: refetchStatus, refetch: refetchNavs } = useRefetchPoll(
+    () => insertPriceRefreshRequest("fund"),
+    pollLatestFundNavTime,
+    fresh,
+  );
 
   // Per-purchase display math. BUY rows keep the usual cost/value/P&L; a SELL
   // row has no "value" of its own (the units are disposed) so we show sale
@@ -241,19 +220,21 @@ export default function FundsClient({
   const productRows = productRowsAll
     .filter((r) => Math.abs(r.units) > 1e-6 || Math.abs(r.realized) > 1e-6 || r.distIncome !== 0)
     .sort((a, b) => {
-      const dir = fundSort.dir === "asc" ? 1 : -1;
-      switch (fundSort.col) {
-        case "name":     return dir * a.name.localeCompare(b.name);
-        case "units":    return dir * (a.units - b.units);
-        case "avgNav":   return dir * (a.avgNav - b.avgNav);
-        case "cost":     return dir * (a.cost - b.cost);
-        case "value":    return dir * ((a.value ?? -Infinity) - (b.value ?? -Infinity));
-        case "pnl":      return dir * ((a.pnl ?? -Infinity) - (b.pnl ?? -Infinity));
-        case "realized": return dir * ((a.realizedIdr ?? -Infinity) - (b.realizedIdr ?? -Infinity));
-        case "dist":     return dir * (a.distIncome - b.distIncome);
-        case "txn":      return dir * (a.txCount - b.txCount);
-        default:         return 0;
-      }
+      const key = (r: typeof a): number | string | null => {
+        switch (fundSort.col) {
+          case "name":     return r.name;
+          case "units":    return r.units;
+          case "avgNav":   return r.avgNav;
+          case "cost":     return r.cost;
+          case "value":    return r.value;
+          case "pnl":      return r.pnl;
+          case "realized": return r.realizedIdr;
+          case "dist":     return r.distIncome;
+          case "txn":      return r.txCount;
+          default:         return 0;
+        }
+      };
+      return compareBy(key(a), key(b), fundSort.dir);
     });
 
   // Funds currently held (net units > 0) — the only funds eligible to sell from.
@@ -278,14 +259,8 @@ export default function FundsClient({
   async function save(v: FormVals & { fund: SelectedFund | null }, id: number | null) {
     const units = Number(v.units);
     const buyNav = Number(v.buyNav);
-    if (!Number.isFinite(units) || units <= 0) {
-      setErr("Units must be a positive number.");
-      throw new Error("invalid units");
-    }
-    if (!Number.isFinite(buyNav) || buyNav <= 0) {
-      setErr("Buy NAV must be a positive number.");
-      throw new Error("invalid buy NAV");
-    }
+    if (!Number.isFinite(units) || units <= 0) throw new Error("Units must be a positive number.");
+    if (!Number.isFinite(buyNav) || buyNav <= 0) throw new Error("Buy NAV must be a positive number.");
     if (id == null) {
       if (!v.fund) return;
       await insertFundPurchase({
@@ -308,7 +283,7 @@ export default function FundsClient({
         purchased_at: new Date(v.purchased).toISOString(),
       });
     }
-    setCreating(false); setEditing(null); setErr(null); router.refresh();
+    setCreating(false); setEditing(null); router.refresh();
   }
 
   async function deactivate(id: number) {
@@ -336,7 +311,7 @@ export default function FundsClient({
       notes: v.notes,
       side: "SELL",
     });
-    setSelling(false); setErr(null); router.refresh();
+    setSelling(false); router.refresh();
   }
 
   async function recordDistribution(v: { fundCode: string; amount: number; paidAt: string; notes: string }) {
@@ -346,7 +321,7 @@ export default function FundsClient({
       paid_at: v.paidAt,
       notes: v.notes,
     });
-    setDistributing(false); setErr(null); router.refresh();
+    setDistributing(false); router.refresh();
   }
 
   return (
@@ -354,48 +329,37 @@ export default function FundsClient({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-medium text-tprimary">Mutual Funds</h1>
-          {fresh && <p className="mt-0.5 text-[11px] text-tdim">NAV synced {fmtAgo(fresh)} · cermati</p>}
+          {fresh && <p className="mt-0.5 text-caption text-tdim">NAV synced {fmtAgo(fresh)} · cermati</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={refetchNavs}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm font-medium text-tmuted hover:text-tprimary disabled:opacity-60"
-          >
+          <button type="button" onClick={refetchNavs} disabled={refreshing} className={secondaryBtnCls}>
             <RefreshCw size={14} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} />
             <span className="hidden sm:inline">{refreshing ? "Refetching…" : "Refetch NAVs"}</span>
             <span className="sm:hidden">{refreshing ? "…" : "NAVs"}</span>
           </button>
           {allFunds.length > 0 && (
-            <button
-              onClick={() => { setDistributing(true); setErr(null); }}
-              className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm font-semibold text-tmuted hover:text-tprimary"
-            >
+            <button type="button" onClick={() => setDistributing(true)} className={secondaryBtnCls}>
               <Receipt size={14} strokeWidth={2} />
               <span className="hidden sm:inline">Record Distribution</span>
               <span className="sm:hidden">Dist.</span>
             </button>
           )}
           {heldFunds.length > 0 && (
-            <button
-              onClick={() => { setSelling(true); setErr(null); }}
-              className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm font-semibold text-tmuted hover:text-tprimary"
-            >
+            <button type="button" onClick={() => setSelling(true)} className={secondaryBtnCls}>
               <Minus size={14} strokeWidth={2} />
               Sell
             </button>
           )}
-          <button
-            onClick={() => { setCreating(true); setErr(null); }}
-            className="flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page"
-          >
+          <PrimaryButton type="button" onClick={() => setCreating(true)}>
             <Plus size={14} strokeWidth={2} />
             Add
-          </button>
+          </PrimaryButton>
         </div>
       </div>
 
-      {err && <p className="text-sm text-critical">{err}</p>}
+      {refetchStatus && (
+        <p role="status" className={`text-sm ${refetchStatus.critical ? "text-critical" : "text-tmuted"}`}>{refetchStatus.text}</p>
+      )}
 
       {purchases.length > 0 && (
         <div className="space-y-2">
@@ -404,24 +368,24 @@ export default function FundsClient({
             <MetricCard label="Total Value (IDR)" value={hasValueIdr ? fmtIdrCompact(totalValueIdr) : "N/A"} fullValue={hasValueIdr ? fmtCurrency(totalValueIdr, "IDR") : "N/A"} />
             <MetricCard
               label="Total P&L (IDR)"
-              value={totalPnlIdr == null ? "N/A" : `${totalPnlIdr >= 0 ? "+" : ""}${fmtIdrCompact(totalPnlIdr)}`}
-              fullValue={totalPnlIdr == null ? "N/A" : `${totalPnlIdr >= 0 ? "+" : ""}${fmtCurrency(totalPnlIdr, "IDR")}`}
-              sub={totalPnlPctIdr != null ? `${totalPnlPctIdr >= 0 ? "+" : ""}${totalPnlPctIdr.toFixed(1)}%` : undefined}
-              color={totalPnlIdr == null ? undefined : totalPnlIdr >= 0 ? "up" : "down"}
+              value={totalPnlIdr == null ? "N/A" : fmtSigned(totalPnlIdr, fmtIdrCompact)}
+              fullValue={totalPnlIdr == null ? "N/A" : fmtSigned(totalPnlIdr, (n) => fmtCurrency(n, "IDR"))}
+              sub={totalPnlPctIdr != null ? fmtSigned(totalPnlPctIdr) : undefined}
+              color={tone(totalPnlIdr)}
               glyph={totalPnlIdr == null ? undefined : dirGlyph(totalPnlIdr)}
             />
             <MetricCard
               label="Realized (IDR)"
-              value={`${totalRealizedIdr >= 0 ? "+" : ""}${fmtIdrCompact(totalRealizedIdr)}`}
-              fullValue={`${totalRealizedIdr >= 0 ? "+" : ""}${fmtCurrency(totalRealizedIdr, "IDR")}`}
-              color={totalRealizedIdr >= 0 ? "up" : "down"}
-              glyph={totalRealizedIdr >= 0 ? "up" : "down"}
+              value={fmtSigned(totalRealizedIdr, fmtIdrCompact)}
+              fullValue={fmtSigned(totalRealizedIdr, (n) => fmtCurrency(n, "IDR"))}
+              color={tone(totalRealizedIdr)}
+              glyph={dirGlyph(totalRealizedIdr)}
             />
             <MetricCard label="Income (IDR)" value={fmtIdrCompact(totalDistIncome)} fullValue={fmtCurrency(totalDistIncome, "IDR")} />
             <MetricCard label="Holdings" value={String(holdingsCount)} />
           </div>
           {productsMissingRate.length > 0 && (
-            <p className="text-[11px] text-tdim">
+            <p className="text-caption text-tdim">
               {productsMissingRate.length} holding{productsMissingRate.length > 1 ? "s" : ""} excluded from totals — FX rate unavailable (run NAV refresh to fetch rates)
             </p>
           )}
@@ -474,12 +438,9 @@ export default function FundsClient({
                 <tr className="text-xs font-semibold text-tdim">
                   {(["name","units","avgNav","cost","value","pnl","realized","dist","txn"] as const).map((col, i) => {
                     const labels: Record<string, string> = { name:"FUND", units:"TOTAL UNITS", avgNav:"AVG BUY NAV", cost:"TOTAL COST", value:"CURRENT VALUE", pnl:"P&L", realized:"REALIZED (IDR)", dist:"INCOME (IDR)", txn:"TXN" };
-                    const active = fundSort.col === col;
                     return (
-                      <th key={col} onClick={() => toggleFundSort(col)}
-                        className={`cursor-pointer select-none pb-2 pr-4 ${i === 0 ? "text-left" : "text-right"} hover:text-tprimary ${active ? "text-tprimary" : ""}`}>
-                        {labels[col]}{active ? (fundSort.dir === "desc" ? " ↓" : " ↑") : ""}
-                      </th>
+                      <SortTh key={col} col={col} label={labels[col]} sort={fundSort} onSort={toggleFundSort}
+                        className={`${i === 8 ? "" : "pr-4"} ${i === 0 ? "text-left" : "text-right"}`} />
                     );
                   })}
                 </tr>
@@ -491,33 +452,25 @@ export default function FundsClient({
                       <button type="button" onClick={() => setInfoCode(r.code)} className="text-left hover:text-ai hover:underline">
                         {r.name}
                       </button>
-                      {r.currency !== "IDR" && <span className="ml-1.5 rounded bg-edge px-1 py-0.5 text-[10px] text-tdim">{r.currency}</span>}
-                      <span className="block text-xs text-tdim">{r.code}</span>
+                      {r.currency !== "IDR" && <span className="ml-1.5 rounded bg-edge px-1 py-0.5 text-caption text-tdim">{r.currency}</span>}
+                      <span className="ml-1.5 text-xs text-tdim">{r.code}</span>
                     </td>
-                    <td className="num py-2 pr-4 text-right">{r.units.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
+                    <td className="num py-2 pr-4 text-right">{fmtNum(r.units, 4)}</td>
                     <td className="num py-2 pr-4 text-right text-tmuted">{fmtCurrency(r.avgNav, r.currency, 2)}</td>
-                    <td className="num py-2 pr-4 text-right text-tmuted">
+                    <td className="num whitespace-nowrap py-2 pr-4 text-right text-tmuted" title={r.costIdr != null && r.currency !== "IDR" ? `≈ ${fmtCurrency(r.costIdr, "IDR")}` : undefined}>
                       {fmtCurrency(r.cost, r.currency)}
-                      {r.costIdr != null && r.currency !== "IDR" && <span className="block text-[10px] text-tdim">≈ {fmtCurrency(r.costIdr, "IDR")}</span>}
+                      {r.costIdr != null && r.currency !== "IDR" && <span className="ml-1 text-caption text-tdim">≈ {fmtIdrCompact(r.costIdr)}</span>}
                     </td>
-                    <td className="num py-2 pr-4 text-right">
+                    <td className="num whitespace-nowrap py-2 pr-4 text-right" title={r.valueIdr != null && r.currency !== "IDR" ? `≈ ${fmtCurrency(r.valueIdr, "IDR")}` : undefined}>
                       {r.value != null ? fmtCurrency(r.value, r.currency) : "—"}
-                      {r.valueIdr != null && r.currency !== "IDR" && <span className="block text-[10px] text-tdim">≈ {fmtCurrency(r.valueIdr, "IDR")}</span>}
+                      {r.valueIdr != null && r.currency !== "IDR" && <span className="ml-1 text-caption text-tdim">≈ {fmtIdrCompact(r.valueIdr)}</span>}
                     </td>
                     <td className="num whitespace-nowrap py-2 pr-4 text-right">
-                      <span className={r.pnl == null ? "text-tdim" : r.pnl >= 0 ? "text-up" : "text-down"}>
-                        {r.pnl == null ? "—" : `${dirGlyph(r.pnl)} ${r.pnl >= 0 ? "+" : ""}${fmtCurrency(r.pnl, r.currency)}`}
-                      </span>
-                      {r.pnlPct != null && (
-                        <span className={`ml-1 text-xs ${r.pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                          ({`${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(1)}%`})
-                        </span>
-                      )}
+                      <Delta value={r.pnl} fmt={(n) => fmtCurrency(n, r.currency)} />
+                      {r.pnlPct != null && <Delta value={r.pnlPct} paren glyph={false} className="ml-1 text-xs" />}
                     </td>
                     <td className="num py-2 pr-4 text-right">
-                      {r.realizedIdr != null
-                        ? <span className={r.realizedIdr >= 0 ? "text-up" : "text-down"}>{`${r.realizedIdr >= 0 ? "+" : ""}${fmtCurrency(r.realizedIdr, "IDR")}`}</span>
-                        : <span className="text-tdim">—</span>}
+                      <Delta value={r.realizedIdr} fmt={(n) => fmtCurrency(n, "IDR")} />
                     </td>
                     <td className="num py-2 pr-4 text-right text-tmuted">{r.distIncome !== 0 ? fmtCurrency(r.distIncome, "IDR") : "—"}</td>
                     <td className="num py-2 text-right text-tdim">{r.txCount}</td>
@@ -535,35 +488,29 @@ export default function FundsClient({
                     <button type="button" onClick={() => setInfoCode(r.code)} className="truncate text-left font-medium text-tprimary hover:text-ai hover:underline">{r.name}</button>
                     <div className="text-xs text-tdim">{r.code} · {r.txCount} txn</div>
                   </div>
-                  {r.pnlPct != null && (
-                    <span className={`shrink-0 text-xs font-medium ${r.pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                      {`${r.pnlPct >= 0 ? "+" : ""}${r.pnlPct.toFixed(1)}%`}
-                    </span>
-                  )}
+                  {r.pnlPct != null && <Delta value={r.pnlPct} className="shrink-0 text-xs font-medium" />}
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <div><span className="text-tdim">Units </span><span className="num text-tprimary">{r.units.toLocaleString("en-US", { maximumFractionDigits: 4 })}</span></div>
+                  <div><span className="text-tdim">Units </span><span className="num text-tprimary">{fmtNum(r.units, 4)}</span></div>
                   <div><span className="text-tdim">Avg NAV </span><span className="num text-tprimary">{fmtCurrency(r.avgNav, r.currency, 2)}</span></div>
                   <div>
                     <span className="text-tdim">Cost </span><span className="num text-tprimary">{fmtCurrency(r.cost, r.currency)}</span>
-                    {r.costIdr != null && r.currency !== "IDR" && <span className="block text-[10px] text-tdim">≈ {fmtCurrency(r.costIdr, "IDR")}</span>}
+                    {r.costIdr != null && r.currency !== "IDR" && <span className="ml-1 text-caption text-tdim">≈ {fmtIdrCompact(r.costIdr)}</span>}
                   </div>
                   <div>
                     <span className="text-tdim">Value </span><span className="num text-tprimary">{r.value != null ? fmtCurrency(r.value, r.currency) : "—"}</span>
-                    {r.valueIdr != null && r.currency !== "IDR" && <span className="block text-[10px] text-tdim">≈ {fmtCurrency(r.valueIdr, "IDR")}</span>}
+                    {r.valueIdr != null && r.currency !== "IDR" && <span className="ml-1 text-caption text-tdim">≈ {fmtIdrCompact(r.valueIdr)}</span>}
                   </div>
                   {r.pnl != null && (
                     <div className="col-span-2">
                       <span className="text-tdim">P&amp;L </span>
-                      <span className={`num ${r.pnl >= 0 ? "text-up" : "text-down"}`}>
-                        {`${dirGlyph(r.pnl)} ${r.pnl >= 0 ? "+" : ""}${fmtCurrency(r.pnl, r.currency)}`}
-                      </span>
+                      <Delta value={r.pnl} fmt={(n) => fmtCurrency(n, r.currency)} />
                     </div>
                   )}
                   {(r.realizedIdr != null || r.distIncome !== 0) && (
                     <div className="col-span-2 flex gap-4">
                       {r.realizedIdr != null && (
-                        <span><span className="text-tdim">Realized </span><span className={`num ${r.realizedIdr >= 0 ? "text-up" : "text-down"}`}>{`${r.realizedIdr >= 0 ? "+" : ""}${fmtCurrency(r.realizedIdr, "IDR")}`}</span></span>
+                        <span><span className="text-tdim">Realized </span><Delta value={r.realizedIdr} fmt={(n) => fmtCurrency(n, "IDR")} /></span>
                       )}
                       {r.distIncome !== 0 && (
                         <span><span className="text-tdim">Income </span><span className="num text-tprimary">{fmtCurrency(r.distIncome, "IDR")}</span></span>
@@ -587,7 +534,7 @@ export default function FundsClient({
                     <div className="flex items-center gap-2">
                       <span className="truncate font-medium text-tprimary">{p.fund_name || p.fund_code}</span>
                       {side === "SELL" && (
-                        <span className="shrink-0 rounded-full border border-down/30 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-down">
+                        <span className="shrink-0 rounded-full border border-edge-hover px-1.5 py-px text-caption font-semibold uppercase tracking-wide text-tmuted">
                           Sell
                         </span>
                       )}
@@ -595,11 +542,7 @@ export default function FundsClient({
                     <div className="text-xs text-tdim">{p.fund_code}{p.platform ? ` · ${p.platform}` : ""}{currency !== "IDR" ? ` · ${currency}` : ""}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {pnlPct != null && (
-                      <span className={`text-xs font-medium ${pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                        {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`}
-                      </span>
-                    )}
+                    {pnlPct != null && <Delta value={pnlPct} className="text-xs font-medium" />}
                     <button
                       onClick={() => setEditing({
                         id: p.id,
@@ -618,16 +561,14 @@ export default function FundsClient({
                   </div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                  <div><span className="text-tdim">Units </span><span className="num text-tprimary">{p.units.toLocaleString("en-US", { maximumFractionDigits: 4 })}</span></div>
+                  <div><span className="text-tdim">Units </span><span className="num text-tprimary">{fmtNum(p.units, 4)}</span></div>
                   <div><span className="text-tdim">{side === "SELL" ? "Sell NAV " : "Buy NAV "}</span><span className="num text-tprimary">{fmtCurrency(p.buy_nav_per_unit, currency, 2)}</span></div>
                   <div><span className="text-tdim">{side === "SELL" ? "Proceeds " : "Cost "}</span><span className="num text-tprimary">{fmtCurrency(rowAmount, currency)}</span></div>
                   <div><span className="text-tdim">Value </span><span className="num text-tprimary">{value != null ? fmtCurrency(value, currency) : "—"}</span></div>
                   {side === "BUY" && (
                     <div className="col-span-2">
                       <span className="text-tdim">P&amp;L </span>
-                      <span className={pnl == null ? "num text-tdim" : `num ${pnl! >= 0 ? "text-up" : "text-down"}`}>
-                        {pnl == null ? "—" : `${dirGlyph(pnl)} ${pnl >= 0 ? "+" : ""}${fmtCurrency(pnl, currency)}`}
-                      </span>
+                      <Delta value={pnl} fmt={(n) => fmtCurrency(n, currency)} />
                     </div>
                   )}
                 </div>
@@ -656,27 +597,21 @@ export default function FundsClient({
                   <tr key={p.id} className="border-t border-edge">
                     <td className="py-2 pr-4 font-medium text-tprimary">
                       {p.fund_name || p.fund_code}
-                      {currency !== "IDR" && <span className="ml-1.5 rounded bg-edge px-1 py-0.5 text-[10px] text-tdim">{currency}</span>}
+                      {currency !== "IDR" && <span className="ml-1.5 rounded bg-edge px-1 py-0.5 text-caption text-tdim">{currency}</span>}
                       {side === "SELL" && (
-                        <span className="ml-2 rounded-full border border-down/30 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-down">
+                        <span className="ml-2 rounded-full border border-edge-hover px-1.5 py-px text-caption font-semibold uppercase tracking-wide text-tmuted">
                           Sell
                         </span>
                       )}
                     </td>
                     <td className="py-2 pr-4 text-tmuted">{p.platform || "—"}</td>
-                    <td className="num py-2 pr-4 text-right">{p.units.toLocaleString("en-US", { maximumFractionDigits: 4 })}</td>
+                    <td className="num py-2 pr-4 text-right">{fmtNum(p.units, 4)}</td>
                     <td className="num py-2 pr-4 text-right">{fmtCurrency(p.buy_nav_per_unit, currency, 2)}</td>
                     <td className="num py-2 pr-4 text-right text-tmuted">{fmtCurrency(rowAmount, currency)}</td>
                     <td className="num py-2 pr-4 text-right">{value != null ? fmtCurrency(value, currency) : "—"}</td>
                     <td className="num whitespace-nowrap py-2 pr-4 text-right">
-                      <span className={pnl == null ? "text-tdim" : pnl >= 0 ? "text-up" : "text-down"}>
-                        {pnl == null ? "—" : `${dirGlyph(pnl)} ${pnl >= 0 ? "+" : ""}${fmtCurrency(pnl, currency)}`}
-                      </span>
-                      {pnlPct != null && (
-                        <span className={`ml-1 text-xs ${pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                          ({`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`})
-                        </span>
-                      )}
+                      <Delta value={pnl} fmt={(n) => fmtCurrency(n, currency)} />
+                      {pnlPct != null && <Delta value={pnlPct} paren glyph={false} className="ml-1 text-xs" />}
                     </td>
                     <td className="whitespace-nowrap py-2 pl-6 pr-4 text-tmuted">{fmtWib(p.purchased_at)}</td>
                     <td className="py-2 text-right">
@@ -723,8 +658,7 @@ export default function FundsClient({
         const cat = catByCode.get(infoCode);
         const rows = holdingsByCode.get(infoCode) ?? [];
         const cur = cat?.currency || nav?.currency || "IDR";
-        const pct = (v: number | null | undefined) =>
-          v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+        const pct = (v: number | null | undefined) => (v == null ? "—" : fmtSigned(v, fmtPctAbs(2)));
         const items: Array<[string, string]> = [
           ["Manager", cat?.investment_manager || "—"],
           ["Type", cat?.fund_type || "—"],
@@ -744,7 +678,7 @@ export default function FundsClient({
               <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
                 {items.map(([label, value]) => (
                   <div key={label}>
-                    <div className="text-[11px] uppercase tracking-wide text-tdim">{label}</div>
+                    <div className="text-caption uppercase tracking-wide text-tdim">{label}</div>
                     <div className="text-tprimary">{value}</div>
                   </div>
                 ))}
@@ -752,7 +686,7 @@ export default function FundsClient({
               <div>
                 <div className="mb-1 flex items-baseline justify-between">
                   <span className="text-sm font-medium text-tprimary">Portfolio composition</span>
-                  {rows[0]?.as_of && <span className="text-[11px] text-tdim">as of {rows[0].as_of}</span>}
+                  {rows[0]?.as_of && <span className="text-caption text-tdim">as of {rows[0].as_of}</span>}
                 </div>
                 {rows.length === 0 ? (
                   <EmptyState message="No composition data yet — synced on the next fund refresh." />
@@ -808,7 +742,8 @@ function FundForm({
   const [touched, setTouched] = useState<AmountField[]>(initial ? ["units", "nav"] : []);
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [purchased, setPurchased] = useState(initial?.purchased ?? nowLocalInput());
-  const [busy, setBusy] = useState<"save" | "remove" | null>(null);
+  const { busy, error, run } = useAsyncAction<"save" | "remove">();
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   function setAmount(field: AmountField, raw: string) {
     const next = deriveAmountFields(field, raw, fields, touched);
@@ -828,13 +763,10 @@ function FundForm({
   const navNum = parseNum(fields.nav);
   const canSave = !!fund && unitsNum != null && unitsNum > 0 && navNum != null && navNum > 0;
 
-  async function run(kind: "save" | "remove", fn: () => Promise<void>) {
-    setBusy(kind);
-    try { await fn(); } catch { setBusy(null); }
-  }
-
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave({
+      platform, currency, units: fields.units, buyNav: fields.nav, total: fields.total, notes, purchased, fund,
+    }))}>
       <div className="grid gap-3">
         {isEdit ? (
           <div className="rounded-md border border-edge bg-page px-3 py-2">
@@ -847,7 +779,7 @@ function FundForm({
               <div className="text-tprimary">{fund.name}</div>
               <div className="text-xs text-tdim">{fund.code}</div>
             </div>
-            <button onClick={() => { setFund(null); setQuery(""); }} className="text-xs text-tdim hover:text-tprimary">
+            <button type="button" onClick={() => { setFund(null); setQuery(""); }} className="text-xs text-tdim hover:text-tprimary">
               Change
             </button>
           </div>
@@ -856,15 +788,17 @@ function FundForm({
             <input
               autoFocus
               placeholder="Search fund by name or code…"
+              aria-label="Search fund by name or code"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={`w-full ${inputCls}`}
             />
             {matches.length > 0 && (
-              <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-edge bg-component shadow-lg">
+              <ul className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md border border-edge bg-component ">
                 {matches.map((c) => (
                   <li key={c.code}>
                     <button
+                      type="button"
                       onClick={() => {
                         setFund({ code: c.code, name: c.name });
                         setCurrency(c.currency || "IDR");
@@ -873,7 +807,7 @@ function FundForm({
                       className="block w-full px-3 py-2 text-left text-sm text-tprimary hover:bg-edge"
                     >
                       <span className="block">{c.name}</span>
-                      <span className="block text-xs text-tdim">{c.code} · {c.fund_type ?? ""} · {c.currency}</span>
+                      <span className="block text-xs text-tmuted">{c.code} · {c.fund_type ?? ""} · {c.currency}</span>
                     </button>
                   </li>
                 ))}
@@ -883,94 +817,87 @@ function FundForm({
         )}
 
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Platform</span>
+          <Field label={<>Platform</>}>
             <input
               list="fund-platform-suggestions"
               placeholder="e.g. Bibit, Bareksa"
               value={platform}
               onChange={(e) => setPlatform(e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
             {knownPlatforms.length > 0 && (
               <datalist id="fund-platform-suggestions">
                 {knownPlatforms.map((p) => <option key={p} value={p} />)}
               </datalist>
             )}
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Purchase Date &amp; Time</span>
+          </Field>
+          <Field label={<>Purchase Date &amp; Time</>}>
             <input
               type="datetime-local"
               value={purchased}
               onChange={(e) => setPurchased(e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Units</span>
+          </Field>
+          <Field label={<>Units</>}>
             <input
               type="number"
               placeholder="e.g. 12345.6789"
               value={fields.units}
               onChange={(e) => setAmount("units", e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Buy NAV per Unit ({currency})</span>
+          </Field>
+          <Field label={<>Buy NAV per Unit ({currency})</>}>
             <input
               type="number"
               placeholder={currency === "IDR" ? "e.g. 1500.50" : "e.g. 1.23"}
               value={fields.nav}
               onChange={(e) => setAmount("nav", e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Total Amount ({currency})</span>
+          </Field>
+          <Field label={<>Total Amount ({currency})</>}>
             <input
               type="number"
               placeholder={currency === "IDR" ? "e.g. 5000000" : "e.g. 1000.00"}
               value={fields.total}
               onChange={(e) => setAmount("total", e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+          </Field>
+          <Field optional label="Notes">
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
-          </label>
+          </Field>
         </div>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={() => run("save", () => onSave({
-            platform, currency, units: fields.units, buyNav: fields.nav, total: fields.total, notes, purchased, fund,
-          }))}
-          disabled={!canSave || busy !== null}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy === "save" ? "Saving…" : "Save"}
-        </button>
-        <button onClick={onCancel} disabled={busy !== null} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-        {onDeactivate && (
-          <button
-            onClick={() => run("remove", onDeactivate)}
-            disabled={busy !== null}
-            className="ml-auto rounded-md px-3 py-1.5 text-sm text-down hover:underline disabled:opacity-60"
-          >
-            {busy === "remove" ? "Removing…" : "Remove"}
-          </button>
-        )}
-      </div>
-    </div>
+      {confirmRemove ? (
+        <div role="alert" className="mt-4 rounded-md border border-edge p-3 text-sm text-tsecondary">
+          Remove this transaction? It disappears from holdings and totals.
+          <div className="mt-2 flex gap-2">
+            <button type="button" disabled={busy !== null} onClick={() => onDeactivate && run("remove", onDeactivate)}
+              className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down disabled:opacity-60">
+              {busy === "remove" ? "Removing…" : "Remove"}
+            </button>
+            <button type="button" disabled={busy !== null} onClick={() => setConfirmRemove(false)} className={secondaryBtnCls}>Keep</button>
+          </div>
+          {error && <p className="mt-2 text-sm text-critical">{error}</p>}
+        </div>
+      ) : (
+        <FormActions busy={busy !== null} saving={busy === "save"} error={error} disabled={!canSave} onCancel={onCancel}>
+          {onDeactivate && (
+            <button type="button" onClick={() => setConfirmRemove(true)} disabled={busy !== null}
+              className="ml-auto rounded-sm px-3 py-2 text-sm text-tmuted hover:text-tprimary hover:underline disabled:opacity-60">
+              Remove
+            </button>
+          )}
+        </FormActions>
+      )}
+    </Form>
   );
 }
 
@@ -1002,7 +929,7 @@ function FundSellForm({
   const [touched, setTouched] = useState<AmountField[]>([]);
   const [notes, setNotes] = useState("");
   const [soldAt, setSoldAt] = useState(nowLocalInput());
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run: runAction } = useAsyncAction();
 
   function selectFund(code: string) {
     setSelectedCode(code);
@@ -1023,33 +950,27 @@ function FundSellForm({
   const overSell = selected != null && unitsNum != null && unitsNum > selected.netUnits + 1e-9;
   const canSave = !!selected && unitsNum != null && unitsNum > 0 && navNum != null && navNum > 0 && !overSell;
 
-  async function run() {
+  function run() {
     if (!selected) return;
-    setBusy(true);
-    try {
-      await onSave({
-        fund: { code: selected.code, name: selected.name },
-        platform,
-        currency: selected.currency,
-        units: fields.units,
-        nav: fields.nav,
-        notes,
-        soldAt,
-      });
-    } catch {
-      setBusy(false);
-    }
+    runAction("save", () => onSave({
+      fund: { code: selected.code, name: selected.name },
+      platform,
+      currency: selected.currency,
+      units: fields.units,
+      nav: fields.nav,
+      notes,
+      soldAt,
+    }));
   }
 
   return (
-    <div>
+    <Form onSubmit={run}>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Fund</span>
+        <Field label={<>Fund</>} className="md:col-span-2">
           <select
             value={selectedCode}
             onChange={(e) => selectFund(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           >
             {heldFunds.length === 0 && <option value="">No holdings available</option>}
             {heldFunds.map((f) => (
@@ -1057,91 +978,74 @@ function FundSellForm({
             ))}
           </select>
           {selected && (
-            <span className="text-[11px] text-tdim">
-              Held: {selected.netUnits.toLocaleString("en-US", { maximumFractionDigits: 4 })} units
+            <span className="text-caption text-tdim">
+              Held: {fmtNum(selected.netUnits, 4)} units
             </span>
           )}
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Platform</span>
+        </Field>
+        <Field label={<>Platform</>}>
           <input
             list="fund-platform-suggestions"
             placeholder="e.g. Bibit, Bareksa"
             value={platform}
             onChange={(e) => setPlatform(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
           {knownPlatforms.length > 0 && (
             <datalist id="fund-platform-suggestions">
               {knownPlatforms.map((p) => <option key={p} value={p} />)}
             </datalist>
           )}
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Sell Date &amp; Time</span>
+        </Field>
+        <Field label={<>Sell Date &amp; Time</>}>
           <input
             type="datetime-local"
             value={soldAt}
             onChange={(e) => setSoldAt(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Units to Sell</span>
+        </Field>
+        <Field label={<>Units to Sell</>}>
           <input
             type="number"
             placeholder="e.g. 1000.0000"
             value={fields.units}
             onChange={(e) => setAmount("units", e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Sell NAV per Unit ({selected?.currency ?? "IDR"})</span>
+        </Field>
+        <Field label={<>Sell NAV per Unit ({selected?.currency ?? "IDR"})</>}>
           <input
             type="number"
             placeholder={(selected?.currency ?? "IDR") === "IDR" ? "e.g. 1500.50" : "e.g. 1.23"}
             value={fields.nav}
             onChange={(e) => setAmount("nav", e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Total Proceeds ({selected?.currency ?? "IDR"})</span>
+        </Field>
+        <Field label={<>Total Proceeds ({selected?.currency ?? "IDR"})</>}>
           <input
             type="number"
             value={fields.total}
             onChange={(e) => setAmount("total", e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Notes" className="md:col-span-2">
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
+        </Field>
       </div>
       {overSell && selected && (
-        <p className="mt-2 text-xs text-critical">
-          Cannot sell more than the {selected.netUnits.toLocaleString("en-US", { maximumFractionDigits: 4 })} units currently held.
+        <p role="alert" className="mt-2 text-xs text-down">
+          Cannot sell more than the {fmtNum(selected.netUnits, 4)} units currently held.
         </p>
       )}
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={run}
-          disabled={!canSave || busy}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Sell"}
-        </button>
-        <button onClick={onCancel} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-      </div>
-    </div>
+      <FormActions busy={busy !== null} error={error} disabled={!canSave} submitLabel="Sell" onCancel={onCancel} />
+    </Form>
   );
 }
 
@@ -1158,77 +1062,53 @@ function FundDistributionForm({
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(todayInput());
   const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run } = useAsyncAction();
 
   const amountNum = Number(amount);
   const canSave = !!fundCode && amountNum > 0 && !!paidAt;
 
-  async function run() {
-    setBusy(true);
-    try {
-      await onSave({ fundCode, amount: amountNum, paidAt, notes });
-    } catch {
-      setBusy(false);
-    }
-  }
-
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave({ fundCode, amount: amountNum, paidAt, notes }))}>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Fund</span>
+        <Field label={<>Fund</>} className="md:col-span-2">
           <select
             value={fundCode}
             onChange={(e) => setFundCode(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           >
             {funds.length === 0 && <option value="">No funds available</option>}
             {funds.map((f) => (
               <option key={f.code} value={f.code}>{f.name} ({f.code})</option>
             ))}
           </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Amount Received (IDR)</span>
+        </Field>
+        <Field label={<>Amount Received (IDR)</>}>
           <input
             autoFocus
             type="number"
             placeholder="e.g. 125000"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Payment Date</span>
+        </Field>
+        <Field label={<>Payment Date</>}>
           <input
             type="date"
             value={paidAt}
             onChange={(e) => setPaidAt(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Notes" className="md:col-span-2">
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
+        </Field>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={run}
-          disabled={!canSave || busy}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Record"}
-        </button>
-        <button onClick={onCancel} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-      </div>
-    </div>
+      <FormActions busy={busy !== null} error={error} disabled={!canSave} submitLabel="Record" onCancel={onCancel} />
+    </Form>
   );
 }

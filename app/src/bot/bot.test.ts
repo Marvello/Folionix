@@ -10,7 +10,8 @@ describe('validatePrice', () => {
 
 describe('validateLots', () => {
   it('passes valid lots', () => expect(() => validateLots(5)).not.toThrow())
-  it('rejects zero', () => expect(() => validateLots(0)).toThrow('LOTS must be >= 1'))
+  it('rejects zero', () => expect(() => validateLots(0)).toThrow('LOTS must be a whole number >= 1'))
+  it('rejects fractions', () => expect(() => validateLots(1.5)).toThrow('LOTS must be a whole number >= 1'))
   it('rejects overflow', () => expect(() => validateLots(1_000_001)).toThrow('LOTS too large'))
 })
 

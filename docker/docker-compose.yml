@@ -12,10 +12,14 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-folionix}
       - POSTGRES_USER=${POSTGRES_USER:-folionix}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+    # postgres:18 keeps PGDATA in /var/lib/postgresql/18/docker, so the volume mounts the
+    # parent dir. A volume created under postgres:17 (mounted at .../data) can NOT be reused:
+    # pg_dump on 17, then restore into a fresh 18 volume.
     volumes:
       - pgdata:/var/lib/postgresql
+    # Services reach the DB over the compose network; publish to loopback only (psql from the host).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     deploy:
       resources:
         limits:
@@ -54,7 +58,6 @@ services:
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
-      - GRAPH_SEND_TELEGRAM=true
       - DATABASE_URL=postgresql://${POSTGRES_USER:-folionix}:${POSTGRES_PASSWORD}@folionix-db:5432/${POSTGRES_DB:-folionix}
     extra_hosts:
       - "ollama-host:host-gateway"
@@ -96,6 +99,7 @@ services:
       - TZ=Asia/Jakarta
       - DATABASE_URL=postgresql://${POSTGRES_USER:-folionix}:${POSTGRES_PASSWORD}@folionix-db:5432/${POSTGRES_DB:-folionix}
       - AUTH_SECRET=${AUTH_SECRET:?AUTH_SECRET required}
+      - AIREVIEW_API_TOKEN=${AIREVIEW_API_TOKEN:-}   # unset = /api/weekly-reviews/latest disabled (503)
       - NEXT_PUBLIC_APP_VERSION=${FOLIONIX_TAG:-latest}
     ports:
       - "3000:3000"

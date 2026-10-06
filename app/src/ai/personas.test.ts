@@ -42,8 +42,10 @@ describe('PERSONAS', () => {
 describe('enabledPersonas', () => {
   afterEach(() => { delete process.env.PERSONAS })
 
-  it('defaults to all 12 when PERSONAS unset', () => {
+  it('defaults to a balanced six when PERSONAS unset; "all" enables 12', () => {
     delete process.env.PERSONAS
+    expect(enabledPersonas().map(p => p.key)).toEqual(['buffett', 'burry', 'lynch', 'druckenmiller', 'graham', 'wood'])
+    process.env.PERSONAS = 'all'
     expect(enabledPersonas()).toHaveLength(12)
   })
 
@@ -53,14 +55,14 @@ describe('enabledPersonas', () => {
     expect(picked.map(p => p.key)).toEqual(['buffett', 'burry', 'lynch'])
   })
 
-  it('skips unknown names and falls back to all when none valid', () => {
+  it('skips unknown names and falls back to the default set when none valid', () => {
     process.env.PERSONAS = 'nobody,unknown'
-    expect(enabledPersonas()).toHaveLength(12)
+    expect(enabledPersonas()).toHaveLength(6)
   })
 
-  it('numeric value takes the first N personas in definition order', () => {
+  it('numeric value takes the first N of a style-balanced order', () => {
     process.env.PERSONAS = '3'
-    expect(enabledPersonas().map(p => p.key)).toEqual(['buffett', 'munger', 'graham'])
+    expect(enabledPersonas().map(p => p.key)).toEqual(['buffett', 'burry', 'lynch'])
     process.env.PERSONAS = '99'
     expect(enabledPersonas()).toHaveLength(12)
   })
@@ -74,7 +76,9 @@ describe('buildPersonaPrompt', () => {
     expect(system).toContain('"signal"')
     expect(user).toContain('BBCA')
     expect(user).toContain('Technical 25')
-    expect(user).toContain('Composite: 36')
+    expect(user).not.toContain('Composite')        // no anchoring on the composite
+    expect(user).toContain('KEY STATS: n/a')       // absent key stats are explicit
+    expect(system).toMatch(/Use ONLY the data provided/)
     expect(user).toContain('held — 10 lots')
     expect(user).toContain('Foreign inflow')
     // The final verdict template must not leak into persona prompts
@@ -108,5 +112,18 @@ describe('parsePersonaResult', () => {
     expect(parsePersonaResult('{"signal":"moon","confidence":50,"reasoning":""}')).toBeNull()
     expect(parsePersonaResult('{"signal":"bullish","reasoning":""}')).toBeNull()
     expect(parsePersonaResult('no json here at all')).toBeNull()
+  })
+})
+
+describe('buildPersonaPrompt key stats', () => {
+  it('renders stored fractions as percents', () => {
+    const { user } = buildPersonaPrompt(PERSONAS.fisher, {
+      ...payload,
+      key_stats: { forward_pe: 12, peg_ratio: 1.1, return_on_equity: 0.185, profit_margins: 0.3,
+        revenue_growth: 0.07, earnings_growth: -0.02, current_ratio: null, free_cashflow: 5e12 },
+    })
+    expect(user).toContain('ROE 18.5%')
+    expect(user).toContain('earnings growth -2.0%')
+    expect(user).toContain('current ratio n/a')
   })
 })

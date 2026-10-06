@@ -107,6 +107,9 @@ export async function runPendingMigrations(): Promise<string[]> {
   const client = await getPool().connect()
   const applied: string[] = []
   try {
+    // The pool's 30s statement_timeout must not apply here: waiting for the lock,
+    // or a long data migration, legitimately takes longer. Reset in finally.
+    await client.query('set statement_timeout = 0')
     // Serialize: bot, graph and worker all start at once against the same DB.
     await client.query('select pg_advisory_lock($1)', [LOCK_KEY])
 
@@ -138,8 +141,16 @@ export async function runPendingMigrations(): Promise<string[]> {
     for (const file of pending) {
       const version = file.slice(0, 3)
       const sql = readFileSync(join(dir, file), 'utf8')
+      // The runner owns the transaction; a file's own BEGIN/COMMIT would commit
+      // half a migration and break atomicity.
+      if (/^\s*(begin|commit)\s*;/im.test(sql)) {
+        throw new Error(`migration ${file} must not contain BEGIN/COMMIT — the runner wraps each file in a transaction`)
+      }
       await client.query('begin')
       try {
+        // Fail fast instead of queueing behind a long web query while holding the
+        // advisory lock that the other services are waiting on.
+        await client.query(`set local lock_timeout = '10s'`)
         await client.query(sql)
         // Convention is that each file registers itself; this is the backstop
         // so a file that forgot its insert cannot re-run on every boot.
@@ -158,6 +169,7 @@ export async function runPendingMigrations(): Promise<string[]> {
     return applied
   } finally {
     await client.query('select pg_advisory_unlock($1)', [LOCK_KEY]).catch(() => {})
+    await client.query('reset statement_timeout').catch(() => {})
     client.release()
   }
 }

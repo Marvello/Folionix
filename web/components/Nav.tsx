@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { LogOut, Menu, X } from "lucide-react";
 import { signOut } from "next-auth/react";
 import Version from "@/components/Version";
@@ -20,8 +20,19 @@ const NAV_LINKS = [
 
 export default function Nav() {
   const pathname = usePathname();
-  const router = useRouter();
   const [drawer, setDrawer] = useState(false);
+  // Close the mobile drawer on route change (incl. back/forward) and Escape.
+  const [lastPath, setLastPath] = useState(pathname);
+  if (pathname !== lastPath) {
+    setLastPath(pathname);
+    setDrawer(false);
+  }
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setDrawer(false);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawer]);
 
   if (pathname === "/login") return null;
 
@@ -29,8 +40,10 @@ export default function Nav() {
     await signOut({ callbackUrl: "/login" });
   }
 
+  const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+
   function linkClass(href: string) {
-    const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+    const active = isActive(href);
     return `rounded-md px-3 py-2 text-sm font-medium ${
       active ? "bg-edge text-tprimary" : "text-tmuted hover:text-tprimary"
     }`;
@@ -39,7 +52,13 @@ export default function Nav() {
   const links = (onNavigate?: () => void) => (
     <>
       {NAV_LINKS.map((l) => (
-        <Link key={l.href} href={l.href} className={linkClass(l.href)} onClick={onNavigate}>
+        <Link
+          key={l.href}
+          href={l.href}
+          className={linkClass(l.href)}
+          aria-current={isActive(l.href) ? "page" : undefined}
+          onClick={onNavigate}
+        >
           {l.label}
         </Link>
       ))}
@@ -48,6 +67,7 @@ export default function Nav() {
 
   const signOutBtn = (
     <button
+      type="button"
       onClick={handleSignOut}
       className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-tdim hover:text-tprimary"
     >
@@ -68,7 +88,7 @@ export default function Nav() {
           priority
           className="mb-6 h-auto w-36"
         />
-        <nav className="flex flex-1 flex-col gap-1">{links()}</nav>
+        <nav aria-label="Main" className="flex flex-1 flex-col gap-1">{links()}</nav>
         <div className="mt-4">{signOutBtn}</div>
         <Version />
       </aside>
@@ -88,13 +108,14 @@ export default function Nav() {
             onClick={() => setDrawer((d) => !d)}
             aria-label={drawer ? "Close menu" : "Open menu"}
             aria-expanded={drawer}
+            aria-controls="mobile-nav"
             className="rounded-md p-2 text-tmuted hover:text-tprimary"
           >
             {drawer ? <X size={20} strokeWidth={1.5} /> : <Menu size={20} strokeWidth={1.5} />}
           </button>
         </div>
         {drawer && (
-          <nav className="flex flex-col gap-1 border-t border-edge px-4 pb-4 pt-2">
+          <nav id="mobile-nav" aria-label="Main" className="flex flex-col gap-1 border-t border-edge px-4 pb-4 pt-2">
             {links(() => setDrawer(false))}
             <div className="mt-2 border-t border-edge pt-2">{signOutBtn}</div>
             <Version />
