@@ -30,6 +30,9 @@ function createPool(config: pg.PoolConfig & { max?: number }): pg.Pool {
 pg.types.setTypeParser(1082, (v: string) => v)
 pg.types.setTypeParser(1114, (v: string) => v)
 pg.types.setTypeParser(1184, (v: string) => v)
+// numeric (ledger money/quantities, migration 046) → JS number; pg returns strings by default,
+// which would concatenate in `sum + amount`. Exact in the DB; doubles in JS are fine for display/math here.
+pg.types.setTypeParser(1700, (v: string) => parseFloat(v))
 
 let _pool: pg.Pool | null = null
 
@@ -370,13 +373,15 @@ export async function getHeldFundSlugs(): Promise<Array<{ fund_code: string; slu
 export async function replaceFundHoldings(fundCode: string, holdings: FundHoldingRow[]): Promise<void> {
   await withTransaction(async (client) => {
     await client.query(`DELETE FROM fund_holdings WHERE fund_code = $1`, [fundCode])
-    for (const r of holdings) {
-      await client.query(
-        `INSERT INTO fund_holdings (fund_code, label, ticker, percentage, as_of)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [r.fund_code, r.label, r.ticker ?? null, r.percentage ?? null, r.as_of],
-      )
-    }
+    if (holdings.length === 0) return
+    await client.query(
+      `INSERT INTO fund_holdings (fund_code, label, ticker, percentage, as_of)
+       SELECT fund_code, label, ticker, percentage, as_of
+         FROM jsonb_to_recordset($1::jsonb) AS x(fund_code text, label text, ticker text, percentage double precision, as_of date)`,
+      [JSON.stringify(holdings.map(r => ({
+        fund_code: r.fund_code, label: r.label, ticker: r.ticker ?? null, percentage: r.percentage ?? null, as_of: r.as_of,
+      })))],
+    )
   })
 }
 
@@ -574,20 +579,18 @@ export async function saveNewsArticles(
   articles: Array<{ headline: string; url: string; publishedAt?: string; summary?: string }>,
 ): Promise<void> {
   if (articles.length === 0) return
-  for (const a of articles) {
-    try {
-      await q(
-        `INSERT INTO news_cache (ticker, source, headline, url, summary, published_at, fetched_at)
-         VALUES ($1, $2, $3, $4, $5, $6, now())
-         ON CONFLICT (url) DO NOTHING`,
-        [ticker, source, a.headline.slice(0, 500), a.url.slice(0, 500),
-         a.summary ?? null, a.publishedAt ?? null],
-      )
-    } catch (err) {
-      console.error('[db] saveNewsArticles failed:', (err as Error).message)
-      throw err
-    }
-  }
+  // One statement per call; ON CONFLICT DO NOTHING also absorbs repeats within the batch.
+  const rows = articles.map(a => ({
+    headline: a.headline.slice(0, 500), url: a.url.slice(0, 500),
+    summary: a.summary ?? null, published_at: a.publishedAt ?? null,
+  }))
+  await q(
+    `INSERT INTO news_cache (ticker, source, headline, url, summary, published_at, fetched_at)
+     SELECT $1, $2, headline, url, summary, published_at, now()
+       FROM jsonb_to_recordset($3::jsonb) AS x(headline text, url text, summary text, published_at timestamptz)
+     ON CONFLICT (url) DO NOTHING`,
+    [ticker, source, JSON.stringify(rows)],
+  )
 }
 
 // ── WEEKLY REVIEW ──

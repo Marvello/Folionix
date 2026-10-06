@@ -1,5 +1,6 @@
 "use client";
 
+import { SecondaryButton } from "@/components/Form";
 import { useState } from "react";
 import Link from "next/link";
 import { fetchFilteredNews } from "@/app/actions";
@@ -109,12 +110,7 @@ export default function NewsList({
       )}
 
       {items.length === count && (
-        <button
-          onClick={onLoadMore}
-          className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted hover:text-tprimary"
-        >
-          Load more
-        </button>
+        <SecondaryButton onClick={onLoadMore}>Load more</SecondaryButton>
       )}
     </div>
   );

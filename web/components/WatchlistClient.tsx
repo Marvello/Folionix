@@ -11,7 +11,7 @@ import RecommendationBadge from "@/components/RecommendationBadge";
 import EmptyState from "@/components/EmptyState";
 import Modal, { ConfirmDialog } from "@/components/Modal";
 import Delta from "@/components/Delta";
-import { Field, Form, FormActions, PrimaryButton, inputCls, useAsyncAction } from "@/components/Form";
+import { Field, Form, FormActions, IconButton, PrimaryButton, inputCls, useAsyncAction } from "@/components/Form";
 import { MiniSparkline } from "@/components/Sparkline";
 
 const TICKER_RE = /^[A-Z0-9]{1,10}$/;
@@ -121,9 +121,9 @@ export default function WatchlistClient({
                     <Link href={`/stocks?ticker=${displayTicker(t)}`} className="font-medium text-accent hover:underline">{displayTicker(t)}</Link>
                     <div className="flex shrink-0 items-center gap-2">
                       <RecommendationBadge rec={recBy.get(t)} />
-                      <button type="button" onClick={() => setRemoving(t)} aria-label={`Remove ${displayTicker(t)}`} className="p-1 text-tdim hover:text-tprimary">
+                      <IconButton onClick={() => setRemoving(t)} aria-label={`Remove ${displayTicker(t)}`}>
                         <X size={15} strokeWidth={1.5} />
-                      </button>
+                      </IconButton>
                     </div>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
@@ -169,9 +169,9 @@ export default function WatchlistClient({
                       <td className="py-2 pr-4 text-right"><MiniSparkline prices={history[t]} /></td>
                       <td className="py-2 pr-4"><RecommendationBadge rec={recBy.get(t)} /></td>
                       <td className="py-2 text-right">
-                        <button type="button" onClick={() => setRemoving(t)} aria-label={`Remove ${displayTicker(t)}`} className="p-1 text-tdim hover:text-tprimary">
+                        <IconButton onClick={() => setRemoving(t)} aria-label={`Remove ${displayTicker(t)}`}>
                           <X size={15} strokeWidth={1.5} />
-                        </button>
+                        </IconButton>
                       </td>
                     </tr>
                   );

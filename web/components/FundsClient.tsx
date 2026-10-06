@@ -19,7 +19,7 @@ import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
 import Delta from "@/components/Delta";
 import SortTh from "@/components/SortTh";
-import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import { Field, Form, FormActions, PrimaryButton, inputCls, SecondaryButton, useAsyncAction } from "@/components/Form";
 import { useSort, compareBy } from "@/lib/useSort";
 import { useRefetchPoll } from "@/lib/useRefetchPoll";
 import Pager from "@/components/Pager";
@@ -332,23 +332,23 @@ export default function FundsClient({
           {fresh && <p className="mt-0.5 text-caption text-tdim">NAV synced {fmtAgo(fresh)} · cermati</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={refetchNavs} disabled={refreshing} className={secondaryBtnCls}>
+          <SecondaryButton onClick={refetchNavs} disabled={refreshing}>
             <RefreshCw size={14} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} />
             <span className="hidden sm:inline">{refreshing ? "Refetching…" : "Refetch NAVs"}</span>
             <span className="sm:hidden">{refreshing ? "…" : "NAVs"}</span>
-          </button>
+          </SecondaryButton>
           {allFunds.length > 0 && (
-            <button type="button" onClick={() => setDistributing(true)} className={secondaryBtnCls}>
+            <SecondaryButton onClick={() => setDistributing(true)}>
               <Receipt size={14} strokeWidth={2} />
               <span className="hidden sm:inline">Record Distribution</span>
               <span className="sm:hidden">Dist.</span>
-            </button>
+            </SecondaryButton>
           )}
           {heldFunds.length > 0 && (
-            <button type="button" onClick={() => setSelling(true)} className={secondaryBtnCls}>
+            <SecondaryButton onClick={() => setSelling(true)}>
               <Minus size={14} strokeWidth={2} />
               Sell
-            </button>
+            </SecondaryButton>
           )}
           <PrimaryButton type="button" onClick={() => setCreating(true)}>
             <Plus size={14} strokeWidth={2} />
@@ -883,7 +883,7 @@ function FundForm({
               className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down disabled:opacity-60">
               {busy === "remove" ? "Removing…" : "Remove"}
             </button>
-            <button type="button" disabled={busy !== null} onClick={() => setConfirmRemove(false)} className={secondaryBtnCls}>Keep</button>
+            <SecondaryButton disabled={busy !== null} onClick={() => setConfirmRemove(false)}>Keep</SecondaryButton>
           </div>
           {error && <p className="mt-2 text-sm text-critical">{error}</p>}
         </div>

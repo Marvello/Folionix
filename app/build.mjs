@@ -9,6 +9,7 @@ await build({
     'src/services/fundamentals.ts',
     'src/services/weekReview.ts',
     'src/db/migrate.ts',
+    'src/utils/heartbeat.ts',
   ],
   bundle: true,
   platform: 'node',

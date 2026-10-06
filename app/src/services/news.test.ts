@@ -33,8 +33,8 @@ vi.mock('../ai/llm.js', async (importOriginal) => {
 
 vi.mock('../db/db.js', () => ({
   getCachedSentiment: vi.fn().mockResolvedValue(null),
-  saveSentiment: vi.fn(),
-  saveNewsArticles: vi.fn(),
+  saveSentiment: vi.fn().mockResolvedValue(undefined),
+  saveNewsArticles: vi.fn().mockResolvedValue(undefined),
   getCachedNewsUrls: vi.fn().mockResolvedValue(new Set()),
 }))
 
@@ -154,5 +154,16 @@ describe('news', () => {
     const { getNewsSentiment } = await import('./news.js')
     expect(await getNewsSentiment('BBCA.JK')).toBe('Sentiment score: -1/5 (mildly bearish).\nCached.')
     expect(parseCalls()).toBe(before)
+  })
+
+  it('a failing cache write is logged, never an unhandled rejection', async () => {
+    const { saveNewsArticles } = await import('../db/db.js')
+    vi.mocked(saveNewsArticles).mockRejectedValueOnce(new Error('db down'))
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { fetchNewsForTicker } = await import('./news.js')
+    await fetchNewsForTicker('BBCA.JK', 'FULL')
+    await new Promise(r => setTimeout(r, 0))
+    expect(err).toHaveBeenCalledWith('[news] cache write failed:', 'db down')
+    err.mockRestore()
   })
 })

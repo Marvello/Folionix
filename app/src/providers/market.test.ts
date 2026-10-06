@@ -71,6 +71,24 @@ describe('fetchStock', () => {
   })
 })
 
+describe('correctDividendYield', () => {
+  const fx = new Map([['USD', 17_923.73]])
+  const base = { reportedYield: 0.0000025, dividendRate: 0.03, price: 12_125, fxToIdr: fx }
+
+  it('recomputes the yield for a USD reporter quoted in IDR', async () => {
+    const { correctDividendYield } = await import('./market.js')
+    expect(correctDividendYield({ ...base, quoteCurrency: 'IDR', financialCurrency: 'USD' })).toBeCloseTo(0.0443, 3)
+  })
+  it('passes through when the currencies agree', async () => {
+    const { correctDividendYield } = await import('./market.js')
+    expect(correctDividendYield({ ...base, reportedYield: 0.045, quoteCurrency: 'IDR', financialCurrency: 'IDR' })).toBe(0.045)
+  })
+  it('returns null rather than a junk yield when the rate is missing', async () => {
+    const { correctDividendYield } = await import('./market.js')
+    expect(correctDividendYield({ ...base, fxToIdr: new Map(), quoteCurrency: 'IDR', financialCurrency: 'USD' })).toBeNull()
+  })
+})
+
 describe('correctPriceToBook', () => {
   const fx = new Map([['USD', 17_923.73]])
   const base = { quoteCurrency: 'IDR', financialCurrency: 'IDR', fxToIdr: fx }
@@ -119,6 +137,16 @@ describe('fetchStock — P/B currency mismatch', () => {
     const snap = await fetchStock('AADI', 8000, 1, null, true)
     expect(snap.pb).toBeCloseTo(1.10, 2)
     expect(snap.pe).toBe(5.42)   // P/E is currency-consistent already
+  })
+
+  it('stores a currency-corrected dividend yield for a USD reporter', async () => {
+    quoteMock.mockResolvedValue({
+      regularMarketPrice: 12_125, currency: 'IDR', financialCurrency: 'USD',
+      trailingAnnualDividendYield: 0.0000025, trailingAnnualDividendRate: 0.03,
+    })
+    const { fetchStock } = await import('./market.js')
+    const snap = await fetchStock('AADI', 0, 0, null, true)
+    expect(snap.div_yield_pct).toBeCloseTo(4.43, 1)   // percent, not ~0
   })
 
   it('leaves a same-currency ratio untouched', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pendingFiles, baselineGaps, findMigrationsDir, SCHEMA_BASELINE } from './migrate'
+import { pendingFiles, findMigrationsDir, SCHEMA_BASELINE } from './migrate'
 
 describe('pendingFiles', () => {
   const files = [
@@ -35,24 +35,15 @@ describe('pendingFiles', () => {
   })
 })
 
-describe('baselineGaps', () => {
-  it('reports unrecorded pre-baseline files so the ledger can be backfilled', () => {
-    const all = ['001_a.sql', '003_b.sql', '036_c.sql', '040_d.sql']
-    expect(baselineGaps(all, new Set(['034', '036']))).toEqual(['001_a.sql', '003_b.sql'])
+describe('SCHEMA_BASELINE', () => {
+  it('matches the newest migration folded into schema.sql and live everywhere', () => {
+    expect(SCHEMA_BASELINE).toBe('039')
   })
 
-  it('is empty once the ledger is whole, and never overlaps pendingFiles', () => {
-    const all = ['001_a.sql', '036_c.sql', '040_d.sql']
-    const done = new Set(['001', '036'])
-    expect(baselineGaps(all, done)).toEqual([])
-    const overlap = baselineGaps(all, new Set()).filter(f => pendingFiles(all, new Set()).includes(f))
-    expect(overlap).toEqual([])
-  })
-
-  it('keeps the baseline at the highest migration present in every database', () => {
-    // NOT the highest number in schema.sql: 039 ships in schema.sql but has not
-    // been applied to any existing database, so it must still execute there.
-    expect(SCHEMA_BASELINE).toBe('038')
+  it('no file at or below the baseline is left in db/migrations', async () => {
+    const { readdirSync } = await import('node:fs')
+    const stale = readdirSync(findMigrationsDir()).filter(f => /^\d{3}_/.test(f) && f.slice(0, 3) <= SCHEMA_BASELINE)
+    expect(stale).toEqual([])
   })
 })
 

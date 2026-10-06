@@ -20,6 +20,7 @@ function createPool(config: pg.PoolConfig & { max?: number }): pg.Pool {
 pg.types.setTypeParser(1082, (v: string) => v);   // date
 pg.types.setTypeParser(1114, (v: string) => v);   // timestamp
 pg.types.setTypeParser(1184, (v: string) => v);   // timestamptz
+pg.types.setTypeParser(1700, (v: string) => parseFloat(v)); // numeric → number (ledger columns, migration 046)
 
 let _pool: pg.Pool | null = null;
 

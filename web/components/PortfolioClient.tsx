@@ -18,7 +18,7 @@ import Modal, { ConfirmDialog } from "@/components/Modal";
 import { MiniSparkline } from "@/components/Sparkline";
 import Delta from "@/components/Delta";
 import SortTh from "@/components/SortTh";
-import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import { Field, Form, FormActions, PrimaryButton, inputCls, SecondaryButton, useAsyncAction } from "@/components/Form";
 import { useSort, compareBy } from "@/lib/useSort";
 import { useRefetchPoll } from "@/lib/useRefetchPoll";
 
@@ -196,10 +196,10 @@ export default function PortfolioClient({
           {fresh && <p className="mt-0.5 text-caption text-tdim">synced {fmtAgo(fresh)} · yfinance</p>}
         </div>
         <div className="flex gap-2">
-          <button type="button" onClick={refetchPrices} disabled={refreshing} className={secondaryBtnCls}>
+          <SecondaryButton onClick={refetchPrices} disabled={refreshing}>
             <RefreshCw size={14} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Refetching…" : "Refetch prices"}
-          </button>
+          </SecondaryButton>
           <PrimaryButton type="button" onClick={() => setTradeModal({ ticker: "", editable: true, tab: "buy" })}>
             <Plus size={14} strokeWidth={2} />
             Buy
@@ -314,8 +314,8 @@ export default function PortfolioClient({
                     </div>
                   </div>
                   <div className="mt-2.5 flex flex-wrap items-center gap-2 border-t border-edge/50 pt-2 text-xs font-medium">
-                    <button type="button" onClick={() => setTradeModal({ ticker: t, editable: false, tab: "buy" })} className="rounded border border-edge px-2.5 py-1 text-tmuted hover:text-tprimary">Trade</button>
-                    <button type="button" onClick={() => setRemoving(t)} className="rounded px-2.5 py-1 text-tmuted hover:bg-page hover:text-tprimary">Remove</button>
+                    <SecondaryButton size="sm" onClick={() => setTradeModal({ ticker: t, editable: false, tab: "buy" })}>Trade</SecondaryButton>
+                    <SecondaryButton size="sm" onClick={() => setRemoving(t)}>Remove</SecondaryButton>
                   </div>
                 </div>
               );

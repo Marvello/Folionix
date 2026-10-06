@@ -69,6 +69,6 @@ describe("money locale + signed deltas", () => {
 describe("tone", () => {
   it("keeps zero neutral", async () => {
     const { tone } = await import("./format");
-    expect([tone(5), tone(-1), tone(0), tone(null)]).toEqual(["up", "down", undefined, undefined]);
+    expect([tone(5), tone(-1), tone(0), tone(1e-9), tone(null)]).toEqual(["up", "down", undefined, undefined, undefined]);
   });
 });

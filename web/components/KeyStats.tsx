@@ -1,5 +1,5 @@
 import type { StockKeyStatsRow } from "@/lib/types";
-import { fmtAgo } from "@/lib/format";
+import { fmtAgo, isStale } from "@/lib/format";
 import { statGroups } from "@/lib/keystats";
 import EmptyState from "./EmptyState";
 
@@ -11,7 +11,7 @@ export default function KeyStats({ row }: { row: StockKeyStatsRow | null }) {
   if (groups.length === 0) {
     return <EmptyState message="No key statistics published for this ticker." />;
   }
-  const stale = Date.now() - new Date(row.fetched_at).getTime() > STALE_MS;
+  const stale = isStale(row.fetched_at, STALE_MS);
   return (
     <section>
       <div className="mb-3 flex items-baseline justify-between">

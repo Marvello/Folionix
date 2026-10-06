@@ -8,7 +8,7 @@ import { fmtIdr, fmtWibDate } from "@/lib/format";
 import type { AccountCharge } from "@/lib/types";
 import EmptyState from "@/components/EmptyState";
 import Modal, { ConfirmDialog } from "@/components/Modal";
-import { Field, Form, FormActions, PrimaryButton, inputCls, useAsyncAction } from "@/components/Form";
+import { Field, Form, FormActions, PrimaryButton, SecondaryButton, inputCls, useAsyncAction } from "@/components/Form";
 import Pager from "@/components/Pager";
 import { usePaged } from "@/lib/usePaged";
 
@@ -90,13 +90,9 @@ export default function AccountChargesClient({ charges }: { charges: AccountChar
                 </div>
                 {c.notes && <p className="mt-2 text-xs text-tmuted">{c.notes}</p>}
                 <div className="mt-2.5 flex justify-end border-t border-edge/50 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => c.id != null && setRemoving(c)}
-                    className="rounded px-2 py-1 text-xs font-medium text-tmuted hover:bg-page hover:text-tprimary"
-                  >
+                  <SecondaryButton size="sm" onClick={() => c.id != null && setRemoving(c)} className="font-medium">
                     Remove
-                  </button>
+                  </SecondaryButton>
                 </div>
               </div>
             ))}
