@@ -9,8 +9,8 @@ export default function DetailTabs({
   hrefFor: (tab: TabId) => string;
 }) {
   return (
-    <nav className="border-b border-edge" aria-label="Detail sections">
-      <ul className="flex gap-6">
+    <nav className="overflow-x-auto border-b border-edge" aria-label="Detail sections">
+      <ul className="flex gap-4 whitespace-nowrap md:gap-6">
         {DETAIL_TABS.map((t) => {
           const on = t.id === active;
           return (

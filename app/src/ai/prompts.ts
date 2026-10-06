@@ -66,6 +66,7 @@ export function buildPrompt(
 ): string {
   const ticker = snapshot.ticker.replace('.JK', '')
   const price = snapshot.current_price ?? 0
+  const priceStr = snapshot.current_price != null ? fmtIdr(snapshot.current_price) : 'N/A'
   const dayPct = snapshot.day_change_pct ?? 0
   const lots = snapshot.lots ?? 0
   const avgPrice = snapshot.avg_price ?? 0
@@ -90,11 +91,9 @@ export function buildPrompt(
       snapshot.low_52w && price
         ? fmtNum(((price - snapshot.low_52w) / snapshot.low_52w) * 100, 2)
         : 'N/A'
+    // Data only — what to do about materiality lives in the instructions below.
     const threshNote =
-      `Total P&L Rp ${sign(totalPnl)}${fmtNum(totalPnl)} ` +
-      `${aboveThresh ? '✅ above' : '⚠️ below'} action threshold ` +
-      `(Rp ${fmtNum(ACTION_THRESHOLD)}). ` +
-      `${aboveThresh ? 'Consider taking action.' : 'Monitor only — not material yet.'}`
+      `${aboveThresh ? 'above' : 'below'} Rp ${fmtNum(ACTION_THRESHOLD)} (|total P&L| = Rp ${fmtNum(Math.abs(totalPnl))})`
 
     pnlBlock = `
 INVESTOR POSITION:
@@ -105,7 +104,7 @@ INVESTOR POSITION:
 - P&L per Share         : ${fmtIdr(pnlPerShare)} (${sign(pnlPct)}${pnlPct.toFixed(2)}%)
 - Total P&L             : Rp ${sign(totalPnl)}${fmtNum(totalPnl)}
 - Status                : ${pnlStatus(pnlPct)}
-- Action Threshold      : ${threshNote}
+- Materiality           : ${threshNote}
 - Dist from 52W High    : ${distFromHigh}%
 - Dist from 52W Low     : ${distFromLow}%`
   }
@@ -117,7 +116,7 @@ INVESTOR POSITION:
     const pb = snapshot.pb != null ? `${snapshot.pb.toFixed(2)}x` : 'N/A'
     const divYield =
       snapshot.div_yield_pct != null
-        ? `${(snapshot.div_yield_pct * 100).toFixed(2)}%`
+        ? `${snapshot.div_yield_pct.toFixed(2)}%`
         : 'N/A'
     const cap = snapshot.market_cap_raw ? fmtCap(snapshot.market_cap_raw) : 'N/A'
     const volStr = snapshot.volume != null ? fmtNum(snapshot.volume) : 'N/A'
@@ -180,8 +179,8 @@ FUNDAMENTALS:
     extraInstructions = ''
   } else if (depth === 'DEEP') {
     wordLimit = 300
-    extraInstructions =
-      'Include a Sector Comparison section: how does this stock compare to sector peers?\n'
+    // No peer data is supplied, so no sector-comparison section (it invited invented peers).
+    extraInstructions = 'Go deeper on the technicals and fundamentals provided.\n'
   } else {
     // FULL (default)
     wordLimit = 200
@@ -193,8 +192,10 @@ FUNDAMENTALS:
       'Factor news sentiment into your recommendation. If news contradicts technical/fundamental signals, flag the conflict.\n'
     // Sentiment now carries a numeric score header; force a decisive stance on
     // strongly bearish news instead of hiding behind a passive HOLD/MONITOR.
+    // News is model-summarized third-party text, so it can lean on a decision but
+    // never force one: a strongly bearish score must be weighed and argued, not obeyed.
     extraInstructions += avgPrice
-      ? 'If the sentiment score is strongly bearish (-3 or lower), do NOT default to a passive HOLD: choose CUT LOSS or TRIM, unless technicals/fundamentals clearly override the news — then justify the override explicitly.\n'
+      ? 'If the sentiment score is strongly bearish (-3 or lower), treat it as a serious risk: consider CUT LOSS or TRIM, and if you still choose HOLD, say why technicals/fundamentals outweigh the news.\n'
       : 'If the sentiment score is strongly bearish (-3 or lower), do NOT issue BUY; wait (MONITOR) or avoid (HOLD).\n'
   }
 
@@ -219,7 +220,7 @@ FUNDAMENTALS:
   const actionSection = avgPrice
     ? `<b>⚡ Recommended Action</b>
 [Concrete action for the held position: BUY / AVERAGE DOWN / HOLD / TRIM / TAKE PROFIT / CUT LOSS — 2-sentence reason + price level.
-If total P&L is below Rp 1.000.000 note that the amount is not yet material, but still state your market view.]`
+If materiality is "below", note that the amount is not yet material, but still state your market view.]`
     : `<b>⚡ Entry Signal</b>
 [BUY (enter now, with entry level) / MONITOR (wait — name the trigger you are waiting for) / HOLD (avoid for now — say why). 2 sentences max.]`
 
@@ -243,23 +244,28 @@ If total P&L is below Rp 1.000.000 note that the amount is not yet material, but
 === ${ticker}${nameStr} ===${sectorStr}
 
 PRICE:
-- Current  : ${fmtIdr(price)} (${arrow(snapshot.day_change_pct)} ${sign(dayPct)}${dayPct.toFixed(2)}%)
+- Current  : ${priceStr} (${arrow(snapshot.day_change_pct)} ${sign(dayPct)}${dayPct.toFixed(2)}%)
 - Volume   : ${snapshot.volume != null ? fmtNum(snapshot.volume) : 'N/A'} shares
-- 52W High : ${fmtIdr(snapshot.high_52w ?? 0)} | 52W Low: ${fmtIdr(snapshot.low_52w ?? 0)}
+- 52W High : ${snapshot.high_52w != null ? fmtIdr(snapshot.high_52w) : 'N/A'} | 52W Low: ${snapshot.low_52w != null ? fmtIdr(snapshot.low_52w) : 'N/A'}
 ${pnlBlock}
 ${fundamentalsBlock}
 ${technicalsBlock}
 ${trendBlock}
 ${newsBlock}
 
+GROUNDING RULES:
+- Use ONLY the numbers shown above. Do not cite any figure, peer, news item or event that is not listed.
+- If a value you need is N/A or absent, say "data not available" — never estimate it.
+- Any price level you give must be one of: current price, SMA20, SMA50, 52W high, 52W low, average buy price — name which.
+
 FORMAT INSTRUCTIONS:
-Write ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
+Write in English, ONLY in Telegram HTML. Use ONLY tags: <b>, <i>, <code>.
 Do NOT use Markdown (**, ##, -, *). Do NOT write \`\`\`html or \`\`\`.
 Maximum ${wordLimit} words.
 ${extraInstructions}
 REQUIRED FORMAT (fill in the bracketed sections):
 
-<b>${ticker} ${arrow(snapshot.day_change_pct)} ${pnlStatus(pnlPct)}</b>
+<b>${ticker} ${arrow(snapshot.day_change_pct)} ${avgPrice ? pnlStatus(snapshot.unrealized_pnl_pct) : '👀 WATCHLIST'}</b>
 <i>${sign(dayPct)}${dayPct.toFixed(2)}% | ${session}</i>
 
 ${positionSection}

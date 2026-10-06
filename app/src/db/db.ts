@@ -11,10 +11,20 @@ import type {
 } from '../../../lib/types.js'
 import type { KeyStats, FinancialPeriod } from '../providers/market.js'
 
-// Shared Postgres client pattern — see github.com/Marvello/common-tech (README).
+// Shared Postgres client pattern — see common-tech/tech-standard/postgres-client.md.
 // Inlined instead of a shared package: nothing to version across repos.
 function createPool(config: pg.PoolConfig & { max?: number }): pg.Pool {
-  return new pg.Pool({ ...config, max: config.max ?? 10 })
+  const pool = new pg.Pool({
+    connectionTimeoutMillis: 10_000,   // an exhausted pool fails instead of waiting forever
+    idleTimeoutMillis: 30_000,
+    // A runaway query or a forgotten open transaction can't hold a connection forever.
+    options: '-c statement_timeout=30000 -c idle_in_transaction_session_timeout=60000',
+    ...config,
+    max: config.max ?? 10,
+  })
+  // Without a listener, an idle client erroring (Postgres restart) crashes Node.
+  pool.on('error', (err) => console.error('[db] idle client error:', err.message))
+  return pool
 }
 
 pg.types.setTypeParser(1082, (v: string) => v)
@@ -27,7 +37,7 @@ export function getPool(): pg.Pool {
   if (!_pool) {
     const url = process.env.DATABASE_URL
     if (!url) throw new Error('DATABASE_URL required')
-    _pool = createPool({ connectionString: url, max: 10 })
+    _pool = createPool({ connectionString: url, max: 10, application_name: `folionix-${process.env.npm_lifecycle_event ?? 'app'}` })
   }
   return _pool
 }
@@ -36,19 +46,26 @@ function q(text: string, params?: unknown[]) {
   return getPool().query(text, params)
 }
 
-// ── PORTFOLIO ──
-
-export async function upsertPosition(
-  ticker: string, avgPrice: number, lots: number, notes: string | null,
-): Promise<void> {
-  await q(
-    `INSERT INTO portfolio_positions (ticker, avg_price, lots, notes, active, updated_at)
-     VALUES ($1, $2, $3, $4, true, now())
-     ON CONFLICT (ticker) DO UPDATE SET avg_price = $2, lots = $3, notes = $4, active = true, updated_at = now()`,
-    [ticker, avgPrice, lots, notes],
-  )
+export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect()
+  let broken: Error | undefined
+  try {
+    await client.query('BEGIN')
+    const result = await fn(client)
+    await client.query('COMMIT')
+    return result
+  } catch (err) {
+    // A failed ROLLBACK means the connection is bad: destroy it, don't re-pool it.
+    await client.query('ROLLBACK').catch((e: Error) => { broken = e })
+    throw err
+  } finally {
+    client.release(broken)
+  }
 }
 
+// ── PORTFOLIO ──
+
+/** Hide a position. Not a ledger write: the recompute trigger re-shows it on the next transaction. */
 export async function deactivatePosition(ticker: string): Promise<void> {
   await q(
     `UPDATE portfolio_positions SET active = false, updated_at = now() WHERE ticker = $1`,
@@ -92,13 +109,14 @@ export async function getStockTransactions(ticker?: string): Promise<StockTransa
 
 // ── SNAPSHOTS ──
 
-export type SnapshotInput = Omit<StockSnapshotRow, 'id' | 'fetched_at'>
+/** A snapshot to store; `id` is set when fetchStock served an already-stored row from cache. */
+export type SnapshotInput = Omit<StockSnapshotRow, 'id' | 'fetched_at'> & { id?: number }
 
 export async function saveSnapshot(data: SnapshotInput): Promise<number> {
-  // Callers may hand back a full DB row (fetchStock's cache-hit path returns
-  // one); drop server-owned columns so we never emit a duplicate target.
-  const { id: _id, fetched_at: _fetched, ...fields } =
-    data as SnapshotInput & { id?: unknown; fetched_at?: unknown }
+  // A cache hit is already stored. Re-inserting it would duplicate the row and,
+  // worse, re-stamp stale prices with fetched_at = now so the cache never expires.
+  if (data.id != null) return data.id
+  const { fetched_at: _fetched, ...fields } = data as SnapshotInput & { fetched_at?: unknown }
   const cols = Object.keys(fields)
   const vals = Object.values(fields)
   cols.push('fetched_at')
@@ -121,7 +139,8 @@ export async function getSnapshotPrice(snapshotId: number): Promise<number | nul
 
 export async function getLatestSnapshot(ticker: string): Promise<StockSnapshotRow | null> {
   const { rows } = await q(
-    `SELECT * FROM latest_snapshots WHERE ticker = $1`,
+    // Direct: a ticker filter is not pushed into the recursive latest_snapshots view.
+    `SELECT * FROM stock_snapshots WHERE ticker = $1 ORDER BY fetched_at DESC, id DESC LIMIT 1`,
     [ticker],
   )
   return rows[0] ?? null
@@ -189,6 +208,68 @@ export async function saveAnalysis(
   return rows[0].id
 }
 
+export async function getKeyStats(ticker: string): Promise<Record<string, number | null> | null> {
+  const { rows } = await q(`SELECT * FROM stock_key_stats WHERE ticker = $1`, [ticker])
+  return rows[0] ?? null
+}
+
+// ── RETENTION ──
+
+/**
+ * Thin history older than `days` (opt-in via RETENTION_DAYS): keep the last
+ * snapshot per ticker per WIB day (enough for the daily indicators and the
+ * accuracy RPC) and never one an analysis references; drop old news cache and
+ * finished jobs. Returns rows deleted per table.
+ */
+export async function pruneHistory(days: number): Promise<Record<string, number>> {
+  const snaps = await q(
+    `DELETE FROM stock_snapshots s USING (
+       SELECT id, row_number() OVER (
+                PARTITION BY ticker, (fetched_at AT TIME ZONE 'Asia/Jakarta')::date
+                ORDER BY fetched_at DESC, id DESC) AS rn
+         FROM stock_snapshots
+        WHERE fetched_at < now() - make_interval(days => $1)) d
+      WHERE s.id = d.id AND d.rn > 1
+        AND NOT EXISTS (SELECT 1 FROM llm_analyses a WHERE a.snapshot_id = s.id)
+        AND NOT EXISTS (SELECT 1 FROM persona_analyses p WHERE p.snapshot_id = s.id)`,
+    [days],
+  )
+  const news = await q(`DELETE FROM news_cache WHERE fetched_at < now() - make_interval(days => $1)`, [days])
+  const jobs = await q(
+    `DELETE FROM analysis_jobs WHERE status IN ('done', 'error') AND finished_at < now() - make_interval(days => $1)`,
+    [days],
+  )
+  return { stock_snapshots: snaps.rowCount ?? 0, news_cache: news.rowCount ?? 0, analysis_jobs: jobs.rowCount ?? 0 }
+}
+
+// ── SCHEDULED RUNS ──
+
+/**
+ * Claim a scheduled job's slot. True exactly once per (job, runKey) across restarts
+ * and replicas. Claimed before running, so a crash mid-job skips that slot rather
+ * than repeating user-visible side effects (reminders, emails).
+ */
+export async function claimScheduledRun(job: string, runKey: string): Promise<boolean> {
+  const { rowCount } = await q(
+    `INSERT INTO scheduled_runs (job, run_key) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [job, runKey],
+  )
+  return rowCount === 1
+}
+
+export async function markAnalysisSent(id: number): Promise<void> {
+  await q(`UPDATE llm_analyses SET sent_telegram = true WHERE id = $1`, [id])
+}
+
+/** Latest analysis actually delivered to Telegram — the baseline for alert dedup. */
+export async function getLastAlertedAnalysis(ticker: string): Promise<LlmAnalysisRow | null> {
+  const { rows } = await q(
+    `SELECT * FROM llm_analyses WHERE ticker = $1 AND sent_telegram ORDER BY analysed_at DESC LIMIT 1`,
+    [ticker],
+  )
+  return rows[0] ?? null
+}
+
 export async function getLatestAnalysis(ticker: string): Promise<LlmAnalysisRow | null> {
   const { rows } = await q(
     `SELECT * FROM llm_analyses WHERE ticker = $1 ORDER BY analysed_at DESC LIMIT 1`,
@@ -239,18 +320,24 @@ export async function deactivateGoldPurchase(id: number): Promise<void> {
 
 export async function upsertFundCatalog(records: FundCatalogRow[]): Promise<void> {
   if (records.length === 0) return
-  const now = new Date().toISOString()
-  for (const r of records) {
-    await q(
-      `INSERT INTO fund_catalog (code, name, slug, fund_type, category, investment_manager, currency, active, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       ON CONFLICT (code) DO UPDATE SET
-         name = $2, slug = $3, fund_type = $4, category = $5, investment_manager = $6,
-         currency = $7, active = $8, updated_at = $9`,
-      [r.code, r.name, r.slug ?? null, r.fund_type ?? null, r.category ?? null,
-       r.investment_manager ?? null, r.currency ?? 'IDR', r.active ?? true, now],
-    )
-  }
+  // One round trip for the whole daily sweep (hundreds of funds), not one per row.
+  // Last row wins if the source repeats a code (ON CONFLICT can't touch a row twice).
+  const byCode = new Map(records.map(r => [r.code, {
+    code: r.code, name: r.name, slug: r.slug ?? null, fund_type: r.fund_type ?? null,
+    category: r.category ?? null, investment_manager: r.investment_manager ?? null,
+    currency: r.currency ?? 'IDR', active: r.active ?? true,
+  }]))
+  await q(
+    `INSERT INTO fund_catalog (code, name, slug, fund_type, category, investment_manager, currency, active, updated_at)
+     SELECT code, name, slug, fund_type, category, investment_manager, currency, active, now()
+       FROM jsonb_to_recordset($1::jsonb) AS x(code text, name text, slug text, fund_type text,
+            category text, investment_manager text, currency text, active boolean)
+     ON CONFLICT (code) DO UPDATE SET
+       name = excluded.name, slug = excluded.slug, fund_type = excluded.fund_type,
+       category = excluded.category, investment_manager = excluded.investment_manager,
+       currency = excluded.currency, active = excluded.active, updated_at = excluded.updated_at`,
+    [JSON.stringify([...byCode.values()])],
+  )
 }
 
 export type FundSnapshotMetrics = Pick<FundSnapshotRow,
@@ -281,9 +368,7 @@ export async function getHeldFundSlugs(): Promise<Array<{ fund_code: string; slu
 }
 
 export async function replaceFundHoldings(fundCode: string, holdings: FundHoldingRow[]): Promise<void> {
-  const client = await getPool().connect()
-  try {
-    await client.query('BEGIN')
+  await withTransaction(async (client) => {
     await client.query(`DELETE FROM fund_holdings WHERE fund_code = $1`, [fundCode])
     for (const r of holdings) {
       await client.query(
@@ -292,13 +377,7 @@ export async function replaceFundHoldings(fundCode: string, holdings: FundHoldin
         [r.fund_code, r.label, r.ticker ?? null, r.percentage ?? null, r.as_of],
       )
     }
-    await client.query('COMMIT')
-  } catch (err) {
-    await client.query('ROLLBACK')
-    throw err
-  } finally {
-    client.release()
-  }
+  })
 }
 
 export async function getFundPurchases(): Promise<FundPurchaseRow[]> {
@@ -373,18 +452,14 @@ export async function upsertDividendSchedule(row: {
   ticker: string; cum_date: string | null; ex_date: string; recording_date: string | null;
   pay_date: string | null; amount_per_share: number | null; amount_estimated: boolean; currency: string | null
 }): Promise<void> {
-  const { rows: existing } = await q(
-    `SELECT source FROM dividend_schedule WHERE ticker = $1 AND ex_date = $2`,
-    [row.ticker, row.ex_date],
-  )
-  if (existing[0]?.source === 'manual') return
-
+  // A manual row always wins; the WHERE makes that check atomic with the write.
   await q(
     `INSERT INTO dividend_schedule (ticker, cum_date, ex_date, recording_date, pay_date, amount_per_share, amount_estimated, currency, source, synced_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'idx', now())
      ON CONFLICT (ticker, ex_date) DO UPDATE SET
        cum_date = $2, recording_date = $4, pay_date = $5, amount_per_share = $6,
-       amount_estimated = $7, currency = $8, source = 'idx', synced_at = now()`,
+       amount_estimated = $7, currency = $8, source = 'idx', synced_at = now()
+     WHERE dividend_schedule.source <> 'manual'`,
     [row.ticker, row.cum_date, row.ex_date, row.recording_date, row.pay_date,
      row.amount_per_share, row.amount_estimated, row.currency],
   )
@@ -623,33 +698,39 @@ export async function getWeeklyReviews(limit = 20): Promise<WeeklyReviewRow[]> {
 
 // ── SYSTEM ──
 
+/** Any unprocessed web refresh request? Served by the partial index on pending requests. */
+export async function hasPendingRefresh(): Promise<boolean> {
+  const { rows } = await q(`SELECT 1 FROM price_refresh_requests WHERE processed_at IS NULL LIMIT 1`)
+  return rows.length > 0
+}
+
 export async function claimPendingRefresh(kind: 'stock' | 'gold' | 'fund' = 'stock'): Promise<boolean> {
-  const { rows } = await q(
-    `SELECT id FROM price_refresh_requests WHERE kind = $1 AND processed_at IS NULL LIMIT 10`,
+  // One atomic statement: marks every pending request of this kind, so leftovers
+  // beyond a batch can't re-trigger another refresh on the next cycle.
+  const { rowCount } = await q(
+    `UPDATE price_refresh_requests SET processed_at = now() WHERE kind = $1 AND processed_at IS NULL`,
     [kind],
   )
-  if (rows.length === 0) return false
-  const ids = rows.map((r: { id: number }) => r.id)
-  await q(
-    `UPDATE price_refresh_requests SET processed_at = now() WHERE id = ANY($1)`,
-    [ids],
-  )
-  return true
+  return (rowCount ?? 0) > 0
 }
 
 // ── ANALYSIS JOBS ──
 
 export async function enqueueAnalysisJobs(jobRows: AnalysisJobRow[]): Promise<boolean> {
+  // One statement = one transaction: if the per-ticker unique index rejects the
+  // consensus row, no persona jobs are left behind orphaned.
+  const rows = jobRows.map(r => ({
+    ticker: r.ticker, kind: r.kind, persona: r.persona ?? null, run_id: r.run_id,
+    status: r.status ?? 'pending', priority: r.priority ?? 0, payload: r.payload ?? null,
+  }))
   try {
-    for (const r of jobRows) {
-      await q(
-        `INSERT INTO analysis_jobs (ticker, kind, persona, run_id, status, priority, payload, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-        [r.ticker, r.kind, r.persona ?? null, r.run_id,
-         r.status ?? 'pending', r.priority ?? 0,
-         r.payload ? JSON.stringify(r.payload) : null],
-      )
-    }
+    await q(
+      `INSERT INTO analysis_jobs (ticker, kind, persona, run_id, status, priority, payload, created_at)
+       SELECT ticker, kind, persona, run_id, status, priority, payload, now()
+         FROM jsonb_to_recordset($1::jsonb)
+           AS x(ticker text, kind text, persona text, run_id uuid, status text, priority int, payload jsonb)`,
+      [JSON.stringify(rows)],
+    )
     return true
   } catch (err) {
     if ((err as { code?: string }).code === '23505') return false
@@ -672,11 +753,20 @@ export async function completeJob(id: number, result: Record<string, unknown> | 
   )
 }
 
+/** Back off before a retry: 30s, 60s, 120s, … capped at 10 min. */
+export function jobRetryDelaySec(attempts: number): number {
+  return Math.min(600, 30 * 2 ** Math.max(0, attempts - 1))
+}
+
 export async function failJob(id: number, message: string, attempts: number, maxAttempts = 3): Promise<void> {
   const status = attempts < maxAttempts ? 'pending' : 'error'
   await q(
-    `UPDATE analysis_jobs SET status = $2, error = $3, finished_at = $4 WHERE id = $1`,
-    [id, status, message, status === 'error' ? new Date().toISOString() : null],
+    `UPDATE analysis_jobs
+        SET status = $2::text, error = $3,
+            finished_at = CASE WHEN $2::text = 'error' THEN now() END,
+            retry_at    = CASE WHEN $2::text = 'pending' THEN now() + make_interval(secs => $4::float8) END
+      WHERE id = $1`,
+    [id, status, message, jobRetryDelaySec(attempts)],
   )
 }
 
@@ -708,7 +798,8 @@ export async function hasActiveRun(ticker: string): Promise<boolean> {
 export async function savePersonaAnalysis(row: PersonaAnalysisRow): Promise<void> {
   await q(
     `INSERT INTO persona_analyses (run_id, snapshot_id, ticker, persona, signal, confidence, reasoning, model, analysed_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     ON CONFLICT (run_id, persona) DO NOTHING`,
     [row.run_id, row.snapshot_id ?? null, row.ticker, row.persona, row.signal,
      row.confidence, row.reasoning ?? null, row.model ?? null, row.analysed_at ?? new Date().toISOString()],
   )

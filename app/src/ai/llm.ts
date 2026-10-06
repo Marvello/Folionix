@@ -2,13 +2,14 @@ import 'dotenv/config'
 import { streamText, LanguageModel } from 'ai'
 import { createOpenAI } from '@ai-sdk/openai'
 import { sanitizeHtml } from '../../../lib/format'
-import { withRetry } from '../utils/retry'
 
 // ── CONFIG ─────────────────────────────────────────────────────────────────
 // Primary backend. LLM_* are canonical; OLLAMA_* kept as legacy fallbacks.
 
 interface LlmTarget {
   model: LanguageModel
+  /** Model name as configured — recorded with each analysis (which target answered). */
+  label: string
   maxOutputTokens?: number
 }
 
@@ -38,7 +39,7 @@ function resolveTarget(
     langModel = openai.chat(model)
   }
 
-  return { model: langModel, maxOutputTokens: numPredict }
+  return { model: langModel, label: model, maxOutputTokens: numPredict }
 }
 
 // Targets are pure functions of these env vars; rebuilding a provider on every
@@ -87,10 +88,25 @@ function buildTargets(): LlmTarget[] {
 
 // ── CALL LLM ───────────────────────────────────────────────────────────────
 
-export async function callLlm(
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS) || 180_000
+const LLM_CHUNK_TIMEOUT_MS = Number(process.env.LLM_CHUNK_TIMEOUT_MS) || 60_000
+
+export interface LlmCallOptions {
+  system?: string
+  temperature?: number
+  /** Per-call output cap; defaults to LLM_NUM_PREDICT (e.g. a persona verdict needs ~300). */
+  maxOutputTokens?: number
+}
+
+export async function callLlm(prompt: string, opts?: LlmCallOptions): Promise<string> {
+  return (await callLlmWithModel(prompt, opts)).text
+}
+
+/** Like callLlm, but also returns which target's model produced the text. */
+export async function callLlmWithModel(
   prompt: string,
-  opts?: { system?: string; temperature?: number },
-): Promise<string> {
+  opts?: LlmCallOptions,
+): Promise<{ text: string; model: string }> {
   // If no system prompt provided, split on first '===' line
   let system = opts?.system
   let userPrompt = prompt
@@ -116,17 +132,21 @@ export async function callLlm(
       // generateText rejects as "Invalid JSON response". Consuming the stream
       // and awaiting the full text works against streaming and plain
       // OpenAI-compatible servers alike.
-      const text = await withRetry(async () => {
-        const result = streamText({
-          model: target.model,
-          prompt: userPrompt,
-          system,
-          temperature: opts?.temperature ?? 0.3,
-          maxOutputTokens: target.maxOutputTokens,
-        })
-        return await result.text
-      }, 3, 1000)
-      if (text?.trim()) return text
+      //
+      // Retries are the SDK's own (429 / 5xx / network only, with backoff); a 4xx or
+      // a timeout moves straight to the next target. The timeouts stop a hung gateway
+      // from blocking the runner loop or a worker job forever.
+      const result = streamText({
+        model: target.model,
+        prompt: userPrompt,
+        system,
+        temperature: opts?.temperature ?? 0.3,
+        maxOutputTokens: opts?.maxOutputTokens ?? target.maxOutputTokens,
+        maxRetries: 2,
+        timeout: { totalMs: LLM_TIMEOUT_MS, chunkMs: LLM_CHUNK_TIMEOUT_MS },
+      })
+      const text = await result.text
+      if (text?.trim()) return { text, model: target.label }
     } catch (err) {
       lastError = err
     }
@@ -148,29 +168,30 @@ const RECOMMENDATION_KEYWORDS = [
   'TRIM',
 ]
 
-export function extractRecommendation(text: string): string {
-  const upper = text.toUpperCase()
+export const HELD_RECOMMENDATIONS = ['BUY', 'AVERAGE DOWN', 'HOLD', 'TRIM', 'TAKE PROFIT', 'CUT LOSS', 'MONITOR']
+export const WATCHLIST_RECOMMENDATIONS = ['BUY', 'MONITOR', 'HOLD']
 
-  // Check for explicit REKOMENDASI line first
-  const rekoMatch = upper.match(/REKOMENDASI[^\n]*/)
-  const scopes = rekoMatch ? [rekoMatch[0], upper] : [upper]
-
-  for (const scope of scopes) {
-    // Pick the keyword that appears EARLIEST in the scope, not the first in list
-    // order — otherwise "MONITOR, do not HOLD" wrongly resolves to HOLD and
-    // poisons the recommendation ledger. Tie on position → longer (multi-word) wins.
-    let best: { kw: string; index: number } | null = null
-    for (const kw of RECOMMENDATION_KEYWORDS) {
-      // Word-boundary matching so e.g. WITHHOLD doesn't match HOLD
-      const m = new RegExp(`\\b${kw.replace(' ', '\\s+')}\\b`).exec(scope)
-      if (!m) continue
-      if (!best || m.index < best.index || (m.index === best.index && kw.length > best.kw.length)) {
-        best = { kw, index: m.index }
-      }
+/**
+ * Read the verdict from the mandatory `REKOMENDASI:` line only. Without that line
+ * (or with a keyword outside `allowed` for the context) the result is UNKNOWN —
+ * guessing from prose turned "not a BUY yet, HOLD" into BUY.
+ */
+export function extractRecommendation(text: string, allowed: string[] = RECOMMENDATION_KEYWORDS): string {
+  const line = text.toUpperCase().match(/REKOMENDASI[^\n]*/)?.[0]
+  if (!line) return 'UNKNOWN'
+  // Pick the keyword that appears EARLIEST on the line, not the first in list
+  // order — "MONITOR, do not HOLD" must resolve to MONITOR. Tie on position →
+  // longer (multi-word) wins.
+  let best: { kw: string; index: number } | null = null
+  for (const kw of RECOMMENDATION_KEYWORDS) {
+    // Word-boundary matching so e.g. WITHHOLD doesn't match HOLD
+    const m = new RegExp(`\\b${kw.replace(' ', '\\s+')}\\b`).exec(line)
+    if (!m) continue
+    if (!best || m.index < best.index || (m.index === best.index && kw.length > best.kw.length)) {
+      best = { kw, index: m.index }
     }
-    if (best) return best.kw
   }
-  return 'UNKNOWN'
+  return best && allowed.includes(best.kw) ? best.kw : 'UNKNOWN'
 }
 
 // ── CLEAN FOR TELEGRAM HTML ────────────────────────────────────────────────

@@ -14,7 +14,7 @@ Indonesian stock portfolio (IDX) analyzer. Fetches market data via yahoo-finance
 ```
 app/                        # Node 24 TypeScript backend (ESM, esbuild)
 ├── package.json            # deps + scripts: bot/graph/worker/prices/portfolio/watchlist/weekreview/migrate/fundamentals/test/typecheck/build
-├── tsconfig.json           # NodeNext, strict, noEmit, includes ../lib/**/*
+├── tsconfig.json           # bundler resolution, strict, noEmit, includes ../lib/**/*
 ├── build.mjs               # esbuild bundle (bot, graph/runner, graph/worker, services/{portfolio,fundamentals,weekReview}, db/migrate)
 └── src/
     ├── db/db.ts            # Postgres data layer (node-postgres pool over DATABASE_URL)
@@ -48,15 +48,15 @@ app/                        # Node 24 TypeScript backend (ESM, esbuild)
         ├── state.ts        # Session, SignalType, OrchestratorState, AnalysisState
         ├── session.ts      # IDX market session detection (WIB time)
         ├── signals.ts      # Signal detection (price move, volume spike)
-        ├── analysis.ts     # Inner graph: analysis pipeline
-        ├── orchestrator.ts # Outer graph: session + signal routing
+        ├── analysis.ts     # runAnalysis(target: tickers | watchlist) → pipelines
+        ├── orchestrator.ts # runCycle(): session → prices → signals → route → analyze
         ├── runner.ts       # Long-running entry point (SIGTERM-aware)
         └── worker.ts       # Deep-run queue worker (claims analysis_jobs, SIGTERM-aware)
 lib/                        # Shared TypeScript (imported by both app/ and web/)
 ├── types.ts                # Postgres row interfaces
 └── format.ts               # Utility functions (fmtIdr, calcPnl, normalizeTicker, …)
 db/                         # SQL assets for the Postgres DB (not imported at runtime)
-├── schema.sql              # consolidated snapshot = migrations 001–036; no RLS
+├── schema.sql              # consolidated snapshot = migrations 001–039 (SCHEMA_BASELINE '038'); no RLS
 ├── migrations/             # incremental changes (037+), applied automatically at startup by app/src/db/migrate.ts
 ├── imports/                # one-off data-import SQL, gitignored (Stockbit history)
 └── seed.sql                # static bootstrap snapshot (optional, hand-edited)
@@ -71,7 +71,7 @@ web/                        # Next.js + Tailwind frontend (App Router)
 docker/                     # Docker-related files
 ├── Dockerfile.app          # Node 24 multi-stage build (deps → builder → runner)
 ├── Dockerfile.web          # Next.js multi-stage build (build context: repo root)
-└── docker-compose.yml      # folionix-db (postgres:17-alpine) / -graph / -bot / -worker / -web
+└── docker-compose.yml      # folionix-db (postgres:18-alpine) / -graph / -bot / -worker / -web
 data/                       # Runtime data (gitignored) — Postgres is the source of truth
 ```
 
@@ -103,7 +103,7 @@ npm run weekreview -- --no-send
 # Telegram bot (long-polling)
 npm run bot
 
-# LangGraph orchestrator (long-running, signal-aware)
+# Orchestrator (long-running, signal-aware)
 npm run graph
 
 # Multi-agent analysis worker (drains analysis_jobs; --enqueue seeds a deep run)
@@ -131,7 +131,7 @@ cd app && npm run build
 
 ## Docker
 
-Services in `docker/docker-compose.yml`: `folionix-db` (`postgres:17-alpine`, `pgdata` volume), `folionix-graph` (LangGraph orchestrator), `folionix-bot` (Telegram), `folionix-worker` (multi-agent analysis-job worker), `folionix-web` (Next.js on 3000). Postgres is vendored into this compose file — bootstrap it per `knowledge/runbooks/postgres-foundation.md`. All share `.env`.
+Services in `docker/docker-compose.yml`: `folionix-db` (`postgres:18-alpine`, `pgdata` volume at `/var/lib/postgresql` — a 17 volume cannot be reused, dump/restore; port bound to 127.0.0.1), `folionix-graph` (orchestrator), `folionix-bot` (Telegram), `folionix-worker` (multi-agent analysis-job worker), `folionix-web` (Next.js on 3000). Postgres is vendored into this compose file — bootstrap it per `knowledge/runbooks/postgres-foundation.md`. All share `.env`.
 
 ```bash
 docker compose -f docker/docker-compose.yml up -d
@@ -139,13 +139,13 @@ docker compose -f docker/docker-compose.yml logs -f folionix-graph
 ```
 
 `folionix-bot`/`folionix-graph` reach host Ollama via `extra_hosts: ollama-host:host-gateway`. Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-compose.yml up -d` (CI pushes sha-tagged images alongside `:latest`; default is `latest`).
-CI/CD: GitHub Actions (`.github/workflows/build.yml`) builds/pushes two multi-arch (`linux/amd64`, `linux/arm64`) images to Docker Hub, gated on tsc + vitest + web build: the Node image `marvellooni/folionix-app` (from `docker/Dockerfile.app`, build context: repo root) and the Next.js web image `marvellooni/folionix-web` (from `docker/Dockerfile.web`; `NEXT_PUBLIC_*` are read at runtime via `window.__ENV` injection, not baked at build). Each arch builds natively (amd64 on `ubuntu-latest`, arm64 on `ubuntu-24.04-arm` — no QEMU) with `type=gha` layer caching, pushes by digest, and a `merge` job assembles the multi-arch `:latest` + `:<sha8>` manifests. `docker/Dockerfile.app` installs deps in their own layer from the root `package.json` + `package-lock.json` plus `app/package.json` (`npm ci --omit=dev -w app` — this is an npm workspace monorepo; the root lockfile is the only one), then copies `app/` + `lib/` and runs `node build.mjs` — keep dependency edits in `app/package.json` and don't reorder those steps.
+CI/CD: GitHub Actions (`.github/workflows/build.yml`) builds/pushes two multi-arch (`linux/amd64`, `linux/arm64`) images to Docker Hub, gated on tsc + vitest (against a Postgres 18 service: `schema.sql` + every migration applied, then `migrate --check`, plus the `*.integration.test.ts` live-DB tests) + web tsc/test/build: the Node image `marvellooni/folionix-app` (from `docker/Dockerfile.app`, build context: repo root) and the Next.js web image `marvellooni/folionix-web` (from `docker/Dockerfile.web`; `NEXT_PUBLIC_*` are read at runtime via `window.__ENV` injection, not baked at build). Each arch builds natively (amd64 on `ubuntu-26.04`, arm64 on `ubuntu-24.04-arm` — no QEMU) with `type=gha` layer caching, pushes by digest, and a `merge` job assembles the multi-arch `:latest` + `:<sha8>` manifests. `docker/Dockerfile.app` installs deps in their own layer from the root `package.json` + `package-lock.json` plus `app/package.json` (`npm ci --omit=dev -w app` — this is an npm workspace monorepo; the root lockfile is the only one), then copies `app/` + `lib/` and runs `node build.mjs` — keep dependency edits in `app/package.json` and don't reorder those steps.
 
 ## Architecture
 
 ```
 app/src/services/portfolio.ts  →  yahoo-finance2 → Vercel AI SDK LLM → Telegram alerts
-app/src/graph/runner.ts        →  LangGraph orchestrator (session-aware, signal-driven)
+app/src/graph/runner.ts        →  orchestrator loop (session-aware, signal-driven; daily jobs latched in scheduled_runs)
 app/src/services/gold.ts       →  cermati GraphQL → gold_snapshots
 app/src/services/funds.ts      →  cermati NAV REST → fund_catalog + fund_snapshots
 app/src/services/bonds.ts      →  par value (no provider; principal entered manually, web-only)
@@ -155,7 +155,7 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
        ↓ (saves)
      app/src/db/db.ts  ←→  Postgres (node-postgres pool, raw SQL) via DATABASE_URL
        ↑ (reads)
-     app/src/bot/bot.ts  ←→  Telegram commands (grammy; /status, /add, /update, /remove, /analyze, /wadd, /wremove, /wlist, /gadd, /glist, /gremove, /gprice, /flist, /fxrefresh, /blist, /weekreview)
+     app/src/bot/bot.ts  ←→  Telegram commands (grammy; /status, /add (records a BUY), /remove (hides), /update (retired), /analyze, /wadd, /wremove, /wlist, /gadd, /glist, /gremove, /gprice, /flist, /fxrefresh, /blist, /weekreview)
      web/               ←→  Next.js dashboard reads/writes Postgres directly (its own pg pool)
 ```
 
@@ -166,11 +166,11 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 - **app/src/providers/finnhub.ts**: Best-effort Finnhub REST fallback; disabled when `FINNHUB_API_KEY` unset. Caveat: USD prices, not IDR.
 - **app/src/db/db.ts**: Postgres data layer — a `node-postgres` pool over `DATABASE_URL`, raw parameterised SQL through a local `q()` helper. Date/timestamp OIDs (1082/1114/1184) are parsed as ISO strings so callers can `.slice()` and compare them. Tables: `stock_snapshots`, `llm_analyses`, `news_cache`, `news_sentiments`, `stock_transactions`, `portfolio_positions`, `stock_dividends`, `watchlist`, `gold_purchases`, `gold_snapshots`, `fund_catalog`, `fund_snapshots`, `fund_purchases`, `fund_distributions`, `bond_holdings`, `weekly_reviews`, `analysis_jobs`, `persona_analyses`, `stock_key_stats`, `stock_financials`, `corporate_actions`; views `latest_snapshots`/`latest_analyses`/`latest_gold_prices`/`latest_fund_navs`/`fund_product_summary`/`corporate_actions_all`; RPC `recommendation_accuracy`, `claim_analysis_job` (atomic `FOR UPDATE SKIP LOCKED` job claim). Stocks are now transaction-backed: `stock_transactions` is the source of truth (BUY/SELL ledger); `portfolio_positions` (avg_price, lots, `realized_pnl`) is a derived cache recomputed by a Postgres trigger on every `stock_transactions` write. `gold_purchases`/`fund_purchases` carry a `side` (BUY default | SELL); holdings are netted buys − sells.
 - **app/src/bot/bot.ts**: grammy Telegram bot with chat ID whitelisting. All 16 commands. `/add`/`/wadd` call `runPriceRefresh` after adding.
-- **web/**: Next.js + Tailwind dashboard (App Router). The stock detail page is tabbed — Overview (Key Stats), Analysis, Financials, Actions, History — with tab state in `?tab=` searchParams so it stays an async Server Component and each render queries only the active tab's tables. Pure tab and stat-group logic lives in `web/lib/tabs.ts` and `web/lib/keystats.ts` with `.test.ts` siblings, because `web/vitest.config.ts` runs `environment: "node"` with no jsdom. Note `web/lib/format.ts` has diverged from `lib/format.ts` and the two are kept in sync by hand. Pages: Dashboard, Portfolio (+CRUD), Watchlist (+CRUD), News, Gold (+CRUD, holdings valued at venue sell-back price), Funds (+CRUD, add via `fund_catalog` autocomplete search, holdings valued at latest NAV), Bonds (+CRUD, valued at par/principal), Reviews (read-only weekly-review reports rendered from markdown, with copy-to-clipboard handover doc). Reads/writes Postgres directly through its own `pg` pool (`web/lib/db.ts`); there is no backend API in the path. Login is email + password via NextAuth Credentials + bcrypt against `public.users` (`web/lib/auth.ts`, JWT sessions), gated by `web/proxy.ts`; there is no public sign-up.
+- **web/**: Next.js + Tailwind dashboard (App Router). The stock detail page is tabbed — Overview (Key Stats), Analysis, Financials, Actions, History — with tab state in `?tab=` searchParams so it stays an async Server Component and each render queries only the active tab's tables. Pure tab and stat-group logic lives in `web/lib/tabs.ts` and `web/lib/keystats.ts` with `.test.ts` siblings, because `web/vitest.config.ts` runs `environment: "node"` with no jsdom. `web/lib/format.ts` holds web-only display helpers; shared logic (`sanitizeHtml`, `escapeHtml`, `calcPnl`, …) is imported from `@folionix/lib` — don't re-implement it in web. Every Server Action in `web/app/actions.ts` calls `requireSession()` and validates its input server-side (`proxy.ts` is not a security boundary for actions). Pages: Dashboard, Portfolio (+CRUD), Watchlist (+CRUD), News, Gold (+CRUD, holdings valued at venue sell-back price), Funds (+CRUD, add via `fund_catalog` autocomplete search, holdings valued at latest NAV), Bonds (+CRUD, valued at par/principal), Reviews (read-only weekly-review reports rendered from markdown, with copy-to-clipboard handover doc). Reads/writes Postgres directly through its own `pg` pool (`web/lib/db.ts`); there is no backend API in the path. Login is email + password via NextAuth Credentials + bcrypt against `public.users` (`web/lib/auth.ts`, JWT sessions), gated by `web/proxy.ts`; there is no public sign-up.
 - **app/src/services/fundamentals.ts**: `refreshFundamentals` — daily sweep over held + watchlist tickers through `utils/mapPool`, writing `stock_key_stats`, `stock_financials` and `corporate_actions` (SPLIT). Per-ticker failures are recorded and skipped, never fatal. Scheduled at `FUNDAMENTALS_HOUR_WIB` (18:00 WIB) by the graph runner; manual via `npm run fundamentals`. **Currency caveat**: yahoo quotes IDX prices in IDR but reports `bookValue` in the issuer's financial currency, so `price_to_book` goes through `correctPriceToBook` and `book_value` is converted with the fx rate (BSSR's raw P/B is 48,529 against a true ~3.0). `trailing_eps`/`forward_eps` are already in the quote currency and are NOT converted.
 - **app/src/services/watchlist.ts**: `loadWatchlist`, `addToWatchlist`, `removeFromWatchlist`; splits user vs ai_suggested rows.
 - **lib/format.ts**: Shared helpers (fmtIdr, fmtCap, calcPnl, pnlIcon, normalizeTicker, valueHolding, sanitizeHtml, WIB).
-- **app/src/graph/**: LangGraph orchestrator (`@langchain/langgraph`). Outer orchestrator (session detection → price refresh → signal check → routing) and inner analysis graph (delegates to portfolio pipeline). Runs as long-running process with SIGTERM handling. Signal-aware, market-session-aware monitoring (ACTIVE_INTERVAL during market hours, IDLE_INTERVAL otherwise).
+- **app/src/graph/**: plain-TypeScript orchestrator (LangGraph removed — it was a straight line with one branch). `runCycle(state)`: session detection → price refresh → signal check → routing → `runAnalysis` (spikes → those tickers, alerting; scheduled/session-boundary → watchlist, silent; held positions get the runner's daily silent baseline). Daily jobs (bonds, dividends, forex, fund NAVs, fundamentals, week review, retention, portfolio baseline) claim a `scheduled_runs` row first, so restarts never repeat them. The idle sleep polls `price_refresh_requests` every 30s and wakes on SIGTERM. Runs as long-running process with SIGTERM handling. Signal-aware, market-session-aware monitoring (ACTIVE_INTERVAL during market hours, IDLE_INTERVAL otherwise).
 - **app/src/services/deepRun.ts** + **app/src/graph/worker.ts**: multi-agent deep runs (gated by `DEEP_RUNS_ENABLED`). MAJOR signals enqueue one run = N persona jobs + 1 consensus job (`analysis_jobs`, shared `run_id`; deterministic `ai/scores.ts` payload computed once at enqueue). The worker claims jobs via the `claim_analysis_job` RPC, runs persona LLM calls (`ai/personas.ts`, JSON verdicts → `persona_analyses`), then consensus (`ai/consensus.ts` decides the keyword deterministically; LLM renders prose) → `saveAnalysis` as `consensus:<model>` + spike Telegram alert. Enqueue failure falls back to the inline single-pass.
 - **app/src/services/gold.ts**: `refreshGoldPrices` (cermati GraphQL → gold_snapshots), `listGoldHoldings` (valued at venue sell-back price). Re-exports `addGoldPurchase`/`deactivateGoldPurchase`.
 - **app/src/services/funds.ts**: `refreshFundNavs` (cermati REST sweep → fund_catalog + fund_snapshots), `listFundHoldings` (valued at latest NAV via `latest_fund_navs` view). Mutations are web-only.
@@ -181,10 +181,10 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 ## Key Configuration
 
 - **Postgres**: source of truth for positions (`portfolio_positions`) and watchlist (`watchlist`, kind = user | ai_suggested). Managed via the bot (`/add`, `/wadd`, …) and web UI. 1 lot = 100 shares. `db/seed.sql` is an optional static bootstrap. The DB runs as the `folionix-db` compose service (`postgres:17-alpine`, `pgdata` volume); the backend connects as the DB owner.
-- **.env**: `DATABASE_URL` (Postgres connection string — read by both `app/` and `web/`; there are no separate backend/frontend DB creds), `AUTH_SECRET` + `AUTH_URL` (NextAuth), `FOLIONIX_WEB_URL` + `AIREVIEW_API_TOKEN` (the `/aireview` local command curls the deployed web app because the DB is not reachable from a dev machine), `NEWS_CACHE_HOURS`, `NEWS_FETCH_ENABLED`, `LLM_BACKEND`, `LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`, `LLM_NUM_PREDICT` (max output tokens; context window is server-side — `OLLAMA_CONTEXT_LENGTH`/Modelfile, not an app var), plus optional fallback `LLM_FALLBACK_BACKEND`/`LLM_FALLBACK_MODEL`/`LLM_FALLBACK_API_BASE`/`LLM_FALLBACK_API_KEY` (each defaults to the primary's value) (legacy `OLLAMA_URL`/`OLLAMA_MODEL`/`OLLAMA_NUM_PREDICT` still read as fallbacks), `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `CACHE_MINUTES`, `SEND_TELEGRAM`, `SIGNAL_PRICE_MINOR`, `SIGNAL_PRICE_MAJOR`, `SIGNAL_VOLUME_MINOR`, `SIGNAL_VOLUME_MAJOR`, `SIGNAL_COOLDOWN_MIN`, `GRAPH_ACTIVE_INTERVAL`/`GRAPH_IDLE_INTERVAL` (runner loop sleep, in minutes), `GRAPH_ANALYSIS_INTERVAL` (scheduled analysis cadence, minutes, default 30), `GOLD_REFRESH_HOURS` (gold price refresh cadence, hours, default 3 — independent of the daily 17:00 WIB fund NAV sweep), `GRAPH_SEND_TELEGRAM`, `REC_STABILITY_PCT` (skip re-analysis while price has moved less than this % since the price the last recommendation was made at, default 2), `REC_MAX_AGE_HOURS` (force a refresh once the last call is older than this even if price never moved, default 72), `FUNDAMENTALS_HOUR_WIB` (hour of the daily fundamentals sweep, default 18; 0 is a valid hour, and a non-numeric value falls back to 18 with a console warning), `PROVIDER_CONCURRENCY` (bounded fan-out for provider fetches, default 4 - read by both `services/portfolio.ts` and `services/fundamentals.ts`), `FINNHUB_API_KEY` (optional fallback), `FINNHUB_BASE_URL`, `CERMATI_GRAPHQL_URL` (Cermati gold-price GraphQL endpoint), `CERMATI_COOKIE` (optional fallback auth), `CERMATI_MF_URL` (optional; Cermati mutual-fund products REST endpoint, defaults to `https://invest.cermati.com/api/v2/mutual-funds/products`), `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`EMAIL_FROM`/`EMAIL_TO` (weekly-review email via Brevo SMTP; alternates `SMTP_SERVER`/`SMTP_USERNAME`/`SMPT_USERNAME`/`SMTP_PASSWORD` also read; email skipped when unset), `DEEP_RUNS_ENABLED` (default false — MAJOR signals enqueue multi-agent deep runs instead of the inline single pass), `PERSONAS` (enabled investor personas — comma list of names or a number = first N, default all 12), `WORKER_POLL_SEC` (worker idle poll, default 10), `WORKER_MAX_ATTEMPTS` (job retries, default 3), `CONSENSUS_MIN_PERSONAS` (default half of enabled), `DEEP_RUN_STALE_MIN` (requeue stuck running jobs on worker start, default 120)
+- **.env**: `DATABASE_URL` (Postgres connection string — read by both `app/` and `web/`; there are no separate backend/frontend DB creds), `AUTH_SECRET` + `AUTH_URL` (NextAuth), `FOLIONIX_WEB_URL` + `AIREVIEW_API_TOKEN` (the `/aireview` local command curls the deployed web app because the DB is not reachable from a dev machine), `NEWS_CACHE_HOURS`, `NEWS_FETCH_ENABLED`, `LLM_BACKEND`, `LLM_MODEL`, `LLM_API_BASE`, `LLM_API_KEY`, `LLM_NUM_PREDICT` (max output tokens; context window is server-side — `OLLAMA_CONTEXT_LENGTH`/Modelfile, not an app var), plus optional fallback `LLM_FALLBACK_BACKEND`/`LLM_FALLBACK_MODEL`/`LLM_FALLBACK_API_BASE`/`LLM_FALLBACK_API_KEY` (each defaults to the primary's value) (legacy `OLLAMA_URL`/`OLLAMA_MODEL`/`OLLAMA_NUM_PREDICT` still read as fallbacks), `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`, `CACHE_MINUTES`, `SEND_TELEGRAM`, `SIGNAL_PRICE_MINOR`, `SIGNAL_PRICE_MAJOR`, `SIGNAL_VOLUME_MINOR`, `SIGNAL_VOLUME_MAJOR`, `SIGNAL_COOLDOWN_MIN`, `GRAPH_ACTIVE_INTERVAL`/`GRAPH_IDLE_INTERVAL` (runner loop sleep, in minutes), `GRAPH_ANALYSIS_INTERVAL` (scheduled analysis cadence, minutes, default 30), `GOLD_REFRESH_HOURS` (gold price refresh cadence, hours, default 3 — independent of the daily 17:00 WIB fund NAV sweep), `REC_STABILITY_PCT` (skip re-analysis while price has moved less than this % since the price the last recommendation was made at, default 2), `REC_MAX_AGE_HOURS` (force a refresh once the last call is older than this even if price never moved, default 72), `FUNDAMENTALS_HOUR_WIB` (hour of the daily fundamentals sweep, default 18; 0 is a valid hour, and a non-numeric value falls back to 18 with a console warning), `PROVIDER_CONCURRENCY` (bounded fan-out for provider fetches, default 4 - read by both `services/portfolio.ts` and `services/fundamentals.ts`), `FINNHUB_API_KEY` (optional fallback), `FINNHUB_BASE_URL`, `CERMATI_GRAPHQL_URL` (Cermati gold-price GraphQL endpoint), `CERMATI_COOKIE` (optional fallback auth), `CERMATI_MF_URL` (optional; Cermati mutual-fund products REST endpoint, defaults to `https://invest.cermati.com/api/v2/mutual-funds/products`), `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`EMAIL_FROM`/`EMAIL_TO` (weekly-review email via Brevo SMTP; alternates `SMTP_SERVER`/`SMTP_USERNAME`/`SMPT_USERNAME`/`SMTP_PASSWORD` also read; email skipped when unset), `DEEP_RUNS_ENABLED` (default false — MAJOR signals enqueue multi-agent deep runs instead of the inline single pass), `PERSONAS` (enabled investor personas — comma list of names, a number = first N of a style-balanced order, or `all`; default the balanced six: buffett, burry, lynch, druckenmiller, graham, wood), `WORKER_POLL_SEC` (worker idle poll, default 10), `WORKER_MAX_ATTEMPTS` (job retries, default 3), `CONSENSUS_MIN_PERSONAS` (default half of enabled), `DEEP_RUN_STALE_MIN` (periodic sweep for stuck running jobs, default 120; at boot every running job is requeued), `LLM_TIMEOUT_MS` (per-call total, default 180000) / `LLM_CHUNK_TIMEOUT_MS` (stream stall, default 60000), `RETENTION_DAYS` (opt-in history thinning, unset = keep everything), `AIREVIEW_API_TOKEN` (also passed to `folionix-web` in compose), `BCRYPT_ROUNDS` (web: cost of the dummy hash used for unknown emails, default 12)
 - Tickers are stored everywhere as the yahoo symbol (`BBCA.JK`, `^JKSE` for IHSG) via `normalizeTicker` — snapshots, analyses, positions, transactions, watchlist, news, dividends (migration `024_ticker_yahoo_symbol.sql`; future-proofs non-IDX markets). UI/Telegram strip the suffix for display via `displayTicker`; URLs carry the plain code
 - All timestamps stored UTC, displayed in WIB (Asia/Jakarta, UTC+7)
-- All local TypeScript imports use `.js` extension (NodeNext ESM)
+- Local TypeScript imports are extensionless or `.js` (bundler resolution; esbuild bundles app, `lib/` included)
 
 ## Conventions
 
@@ -201,8 +201,11 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 
 - Docker runs as non-root (`appuser`)
 - Never expose internal errors/stack traces to users — log internally, show generic message
-- All ticker inputs validated with regex `^[A-Z0-9]{1,10}$`
+- Ticker inputs: bot `^[A-Z0-9]{1,7}$`; server actions accept stored symbols `^(\^JKSE|[A-Z0-9]{1,7}\.JK)$`
 - No RLS (dropped in migration 035). Auth is enforced by NextAuth + `web/proxy.ts`; both app and web connect as the DB owner, so any DB access is full access — keep `DATABASE_URL` off the client
+- Telegram HTML: interpolate user/DB text through `escapeHtml`; LLM output only through `sanitizeHtml` (bare b/i/u/s/code/pre, never attributes). `sendTelegram` returns whether delivery succeeded — persist that, not intent.
+- Login (`web/lib/auth.ts`): per-email + per-IP throttle (`web/lib/loginThrottle.ts`), constant-time unknown-email path, failures logged.
+- Untrusted text (RSS / scraped pages) enters prompts only fenced in `<news><article>` and marked untrusted (`services/news.ts`).
 - Secrets via `.env` only, never hardcoded; `DATABASE_URL` and `AUTH_SECRET` are server-side only — never expose them via `NEXT_PUBLIC_*`
 
 ## graphify

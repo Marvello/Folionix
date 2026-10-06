@@ -10,6 +10,9 @@ import type { BondHolding, BondCouponPayment, BondCouponSchedule } from "@/lib/t
 import MetricCard from "@/components/MetricCard";
 import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
+import SortTh from "@/components/SortTh";
+import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import { useSort, compareBy } from "@/lib/useSort";
 
 const SERIES_TYPES = ["SR", "ORI", "SBR", "ST", "CORP"] as const;
 type SeriesType = (typeof SERIES_TYPES)[number];
@@ -70,14 +73,9 @@ export default function BondsClient({
   const [schedulePage, setSchedulePage] = useState(1);
   const [bulkPayFor, setBulkPayFor] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [bondSort, setBondSort] = useState<{ col: string; dir: "asc" | "desc" }>({ col: "total_principal", dir: "desc" });
-
-  function toggleBondSort(col: string) {
-    setBondSort((s) => ({ col, dir: s.col === col && s.dir === "desc" ? "asc" : "desc" }));
-  }
+  const { sort: bondSort, toggle: toggleBondSort } = useSort({ col: "total_principal", dir: "desc" }, ["series", "maturity"]);
   const [editing, setEditing] = useState<(FormVals & { id: number }) | null>(null);
   const [loggingPayment, setLoggingPayment] = useState<PaymentForm | null>(null);
-  const [err, setErr] = useState<string | null>(null);
   const currentYear = String(new Date().getFullYear());
   const [yearFilter, setYearFilter] = useState(currentYear);
 
@@ -147,17 +145,18 @@ export default function BondsClient({
     ...agg,
     avg_coupon: agg.coupon_weight > 0 ? agg.coupon_sum / agg.coupon_weight : null,
   })).sort((a, b) => {
-    const dir = bondSort.dir === "asc" ? 1 : -1;
-    switch (bondSort.col) {
-      case "series":          return dir * a.code.localeCompare(b.code);
-      case "total_principal": return dir * (a.total_principal - b.total_principal);
-      case "avg_coupon":      return dir * ((a.avg_coupon ?? -Infinity) - (b.avg_coupon ?? -Infinity));
-      case "annual_income":   return dir * (a.annual_income - b.annual_income);
-      case "total_received":  return dir * (a.total_received - b.total_received);
-      case "maturity":        return dir * ((a.maturity_date ?? "").localeCompare(b.maturity_date ?? ""));
-      case "txn":             return dir * (a.txCount - b.txCount);
-      default:                return 0;
-    }
+    const key = (r: typeof a): number | string | null => {
+      switch (bondSort.col) {
+        case "series":          return r.code;
+        case "total_principal": return r.total_principal;
+        case "avg_coupon":      return r.avg_coupon;
+        case "annual_income":   return r.annual_income;
+        case "total_received":  return r.total_received;
+        case "maturity":        return r.maturity_date ?? "";
+        default:                return 0;
+      }
+    };
+    return compareBy(key(a), key(b), bondSort.dir);
   });
 
   // Summary MetricCard totals
@@ -176,20 +175,12 @@ export default function BondsClient({
     const principal = Number(vals.principal);
     const purchasePrice = vals.purchasePrice === "" ? null : Number(vals.purchasePrice);
     const coupon = vals.coupon === "" ? null : Number(vals.coupon);
-    if (!Number.isFinite(principal) || principal <= 0) {
-      setErr("Principal must be a positive number.");
-      throw new Error("invalid principal");
-    }
+    if (!Number.isFinite(principal) || principal <= 0) throw new Error("Principal must be a positive number.");
     if (purchasePrice != null && (!Number.isFinite(purchasePrice) || purchasePrice <= 0)) {
-      setErr("Purchase price must be a positive number.");
-      throw new Error("invalid purchase price");
+      throw new Error("Purchase price must be a positive number.");
     }
-    if (coupon != null && (!Number.isFinite(coupon) || coupon < 0)) {
-      setErr("Coupon rate must be zero or positive.");
-      throw new Error("invalid coupon rate");
-    }
-    try {
-      await saveBondHolding(id, {
+    if (coupon != null && (!Number.isFinite(coupon) || coupon < 0)) throw new Error("Coupon rate must be zero or positive.");
+    await saveBondHolding(id, {
         series_type: vals.seriesType,
         series_code: vals.seriesCode.trim(),
         platform: vals.platform,
@@ -200,20 +191,17 @@ export default function BondsClient({
         purchased_at: new Date(vals.purchased + "T00:00:00").toISOString(),
         notes: vals.notes,
       });
-    } catch (e) { setErr(String(e)); throw e; }
-    setCreating(false); setEditing(null); setErr(null); router.refresh();
+    setCreating(false); setEditing(null); router.refresh();
   }
 
   async function deactivate(id: number) {
-    try { await deactivateBondHolding(id); } catch (e) { setErr(String(e)); throw e; }
+    await deactivateBondHolding(id);
     setEditing(null); router.refresh();
   }
 
   async function savePayment(bondId: number, amount: number, paidAt: string, notes: string) {
-    try {
-      await insertBondCouponPayments([{ bond_holding_id: bondId, amount, paid_at: paidAt, notes }]);
-    } catch (e) { setErr(String(e)); throw e; }
-    setLoggingPayment(null); setErr(null); router.refresh();
+    await insertBondCouponPayments([{ bond_holding_id: bondId, amount, paid_at: paidAt, notes }]);
+    setLoggingPayment(null); router.refresh();
   }
 
   async function saveBulkPayment(seriesCode: string, totalAmount: number, paidAt: string, notes: string) {
@@ -228,8 +216,8 @@ export default function BondsClient({
       paid_at: paidAt,
       notes,
     }));
-    try { await insertBondCouponPayments(rows); } catch (e) { setErr(String(e)); throw e; }
-    setBulkPayFor(null); setErr(null); router.refresh();
+    await insertBondCouponPayments(rows);
+    setBulkPayFor(null); router.refresh();
   }
 
   // Log a coupon straight from the schedule: explicit per-holding amounts, date
@@ -248,24 +236,20 @@ export default function BondsClient({
         notes,
       }));
     if (!rows.length) return;
-    try { await insertBondCouponPayments(rows); } catch (e) { setErr(String(e)); throw e; }
-    setSchedLogDate(null); setErr(null); router.refresh();
+    await insertBondCouponPayments(rows);
+    setSchedLogDate(null); router.refresh();
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-medium text-tprimary">Bonds</h1>
-        <button
-          onClick={() => { setCreating(true); setErr(null); }}
-          className="flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page"
-        >
+        <PrimaryButton type="button" onClick={() => setCreating(true)}>
           <Plus size={14} strokeWidth={2} />
           Add Bond
-        </button>
+        </PrimaryButton>
       </div>
 
-      {err && <p className="text-sm text-critical">{err}</p>}
 
       {holdings.length > 0 && (
         <div className="space-y-3">
@@ -274,10 +258,12 @@ export default function BondsClient({
             {payYears.map((y) => (
               <button
                 key={y}
+                type="button"
+                aria-pressed={yearFilter === y}
                 onClick={() => setYearFilter(y)}
                 className={`rounded-md border px-2.5 py-1 ${
                   yearFilter === y
-                    ? "border-btn bg-btn font-semibold text-page"
+                    ? "border-accent bg-edge font-semibold text-tprimary"
                     : "border-edge text-tmuted hover:text-tprimary"
                 }`}
               >
@@ -320,15 +306,12 @@ export default function BondsClient({
             <table className="w-full min-w-[44rem] text-sm">
               <thead>
                 <tr className="text-xs font-semibold text-tdim">
-                  {(["series","total_principal","avg_coupon","annual_income","total_received","maturity"] as const).map((col, i) => {
+                  {(["series","total_principal","avg_coupon","annual_income","total_received","maturity"] as const).map((col) => {
                     const labels: Record<string, string> = { series:"SERIES", total_principal:"TOTAL PRINCIPAL", avg_coupon:"AVG COUPON", annual_income:"EST. ANNUAL INCOME", total_received:"RECEIVED", maturity:"MATURITY" };
-                    const active = bondSort.col === col;
                     const alignRight = col !== "series" && col !== "maturity";
                     return (
-                      <th key={col} onClick={() => toggleBondSort(col)}
-                        className={`cursor-pointer select-none pb-2 pr-4 ${i === 0 ? "text-left" : alignRight ? "text-right" : "text-left"} hover:text-tprimary ${active ? "text-tprimary" : ""}`}>
-                        {labels[col]}{active ? (bondSort.dir === "desc" ? " ↓" : " ↑") : ""}
-                      </th>
+                      <SortTh key={col} col={col} label={labels[col]} sort={bondSort} onSort={toggleBondSort}
+                        className={`pr-4 ${alignRight ? "text-right" : "text-left"}`} />
                     );
                   })}
                   <th className="pb-2"></th>
@@ -512,7 +495,7 @@ export default function BondsClient({
                       </td>
                       <td className="num whitespace-nowrap py-2 pr-4 text-right">
                         {b.coupon_rate != null ? `${b.coupon_rate}%` : "—"}
-                        {lastPaidAt && <span className="ml-1 text-[10px] text-tdim">· {fmtWibDate(lastPaidAt)}</span>}
+                        {lastPaidAt && <span className="ml-1 text-caption text-tdim">· {fmtWibDate(lastPaidAt)}</span>}
                       </td>
                       <td className="num py-2 pr-4 text-right">
                         {rcvd > 0 ? <span className="text-up">{fmtIdr(rcvd)}</span> : <span className="text-tdim">—</span>}
@@ -691,7 +674,7 @@ export default function BondsClient({
                                 <div>
                                   <span className="num text-up">{fmtIdr(totalOnDate)}</span>
                                   {pays.length > 1 && pays.map((p) => (
-                                    <div key={p.id} className="text-[10px] text-tdim">
+                                    <div key={p.id} className="text-caption text-tdim">
                                       {holdingById.get(p.bond_holding_id)?.platform || scheduleFor} · <span className="num">{fmtIdr(p.amount)}</span>
                                     </div>
                                   ))}
@@ -757,123 +740,112 @@ function BondForm({
   const [maturity, setMaturity] = useState(initial?.maturity ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [purchased, setPurchased] = useState(initial?.purchased ?? todayInput());
-  const [busy, setBusy] = useState<"save" | "remove" | null>(null);
+  const { busy, error, run } = useAsyncAction<"save" | "remove">();
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   function vals(): FormVals {
     return { seriesType, seriesCode, platform, principal, purchasePrice, coupon, maturity, notes, purchased };
   }
-  async function run(kind: "save" | "remove", fn: () => Promise<void>) {
-    setBusy(kind);
-    try { await fn(); } catch { setBusy(null); }
-  }
 
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave(vals()))}>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Series Type</span>
+        <Field label={<>Series Type</>}>
           <select
             value={seriesType}
             onChange={(e) => setSeriesType(e.target.value as SeriesType)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           >
             {SERIES_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Series Code</span>
+        </Field>
+        <Field label={<>Series Code</>}>
           <input
             placeholder="e.g. ORI025"
             value={seriesCode}
             onChange={(e) => setSeriesCode(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Platform</span>
+        </Field>
+        <Field label={<>Platform</>}>
           <input
             placeholder="e.g. Bibit, BCA"
             value={platform}
             onChange={(e) => setPlatform(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Principal (IDR)</span>
+        </Field>
+        <Field label={<>Principal (IDR)</>}>
           <input
             type="number"
             value={principal}
             onChange={(e) => setPrincipal(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Purchase Price (IDR) <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Purchase Price (IDR)">
           <input
             type="number"
             value={purchasePrice}
             onChange={(e) => setPurchasePrice(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Coupon Rate (%) <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Coupon Rate (%)">
           <input
             type="number"
             value={coupon}
             onChange={(e) => setCoupon(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Maturity Date</span>
+        </Field>
+        <Field label={<>Maturity Date</>}>
           <input
             type="date"
             value={maturity}
             onChange={(e) => setMaturity(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Purchase Date</span>
+        </Field>
+        <Field label={<>Purchase Date</>}>
           <input
             type="date"
             value={purchased}
             onChange={(e) => setPurchased(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Notes" className="md:col-span-2">
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
+        </Field>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={() => run("save", () => onSave(vals()))}
-          disabled={!seriesCode.trim() || !principal || busy !== null}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy === "save" ? "Saving…" : "Save"}
-        </button>
-        <button onClick={onCancel} disabled={busy !== null} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-        {onDeactivate && (
-          <button
-            onClick={() => run("remove", onDeactivate)}
-            disabled={busy !== null}
-            className="ml-auto rounded-md px-3 py-1.5 text-sm text-down hover:underline disabled:opacity-60"
-          >
-            {busy === "remove" ? "Removing…" : "Remove"}
-          </button>
-        )}
-      </div>
-    </div>
+      {confirmRemove ? (
+        <div role="alert" className="mt-4 rounded-md border border-edge p-3 text-sm text-tsecondary">
+          Remove this bond? It disappears from holdings and totals; logged coupons stay.
+          <div className="mt-2 flex gap-2">
+            <button type="button" disabled={busy !== null} onClick={() => onDeactivate && run("remove", onDeactivate)}
+              className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down disabled:opacity-60">
+              {busy === "remove" ? "Removing…" : "Remove"}
+            </button>
+            <button type="button" disabled={busy !== null} onClick={() => setConfirmRemove(false)} className={secondaryBtnCls}>Keep</button>
+          </div>
+          {error && <p className="mt-2 text-sm text-critical">{error}</p>}
+        </div>
+      ) : (
+        <FormActions busy={busy !== null} saving={busy === "save"} error={error} disabled={!seriesCode.trim() || !principal} onCancel={onCancel}>
+          {onDeactivate && (
+            <button type="button" onClick={() => setConfirmRemove(true)} disabled={busy !== null}
+              className="ml-auto rounded-sm px-3 py-2 text-sm text-tmuted hover:text-tprimary hover:underline disabled:opacity-60">
+              Remove
+            </button>
+          )}
+        </FormActions>
+      )}
+    </Form>
   );
 }
 
@@ -887,61 +859,42 @@ function CouponForm({
   const [amount, setAmount] = useState("");
   const [paidAt, setPaidAt] = useState(todayInput());
   const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run } = useAsyncAction();
 
   const amountNum = Number(amount);
   const canSave = amountNum > 0 && !!paidAt;
 
-  async function run() {
-    setBusy(true);
-    try { await onSave(amountNum, paidAt, notes); } catch { setBusy(false); }
-  }
-
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave(amountNum, paidAt, notes))}>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Amount Received (IDR)</span>
+        <Field label={<>Amount Received (IDR)</>}>
           <input
             autoFocus
             type="number"
             placeholder="e.g. 541667"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Payment Date</span>
+        </Field>
+        <Field label={<>Payment Date</>}>
           <input
             type="date"
             value={paidAt}
             onChange={(e) => setPaidAt(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Notes" className="md:col-span-2">
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
+        </Field>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={run}
-          disabled={!canSave || busy}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Log Payment"}
-        </button>
-        <button onClick={onCancel} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-      </div>
-    </div>
+      <FormActions busy={busy !== null} error={error} disabled={!canSave} submitLabel="Log Payment" onCancel={onCancel} />
+    </Form>
   );
 }
 
@@ -962,20 +915,15 @@ function ScheduleLogForm({
     () => Object.fromEntries(holdings.map((h) => [h.id, prefill[h.id] ?? ""])),
   );
   const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run } = useAsyncAction();
 
   const rows = holdings.map((h) => ({ bondId: h.id, amount: Number(amounts[h.id]) || 0 }));
   const total = rows.reduce((s, r) => s + r.amount, 0);
   const canSave = total > 0;
 
-  async function run() {
-    setBusy(true);
-    try { await onSave(rows.filter((r) => r.amount > 0), notes); } catch { setBusy(false); }
-  }
-
   return (
-    <div>
-      <button onClick={onBack} className="mb-3 text-xs text-tdim hover:text-tprimary">← Back to schedule</button>
+    <Form onSubmit={() => run("save", () => onSave(rows.filter((r) => r.amount > 0), notes))}>
+      <button type="button" onClick={onBack} className="mb-3 text-xs text-tdim hover:text-tprimary">← Back to schedule</button>
       {holdings.length === 0 ? (
         <p className="py-4 text-center text-sm text-tdim">No holdings were purchased by this date.</p>
       ) : (
@@ -989,6 +937,7 @@ function ScheduleLogForm({
                 <span className="text-xs text-tmuted">{h.platform || seriesCode} · {fmtIdr(h.principal)}</span>
                 <input
                   type="number"
+                  aria-label={`Amount for ${h.platform || seriesCode}`}
                   value={amounts[h.id] ?? ""}
                   onChange={(e) => setAmounts((a) => ({ ...a, [h.id]: e.target.value }))}
                   className="num w-40 rounded-md border border-edge bg-page px-3 py-2 text-right text-tprimary"
@@ -996,32 +945,20 @@ function ScheduleLogForm({
               </label>
             ))}
           </div>
-          <label className="mt-3 flex flex-col gap-1">
-            <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+          <Field label="Notes" optional className="mt-3">
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+              className={inputCls}
             />
-          </label>
+          </Field>
           <div className="mt-2 text-right text-xs text-tdim">
             Total <span className="num text-tprimary">{fmtIdr(total)}</span>
           </div>
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={run}
-              disabled={!canSave || busy}
-              className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {busy ? "Saving…" : "Log Payment"}
-            </button>
-            <button onClick={onBack} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-              Cancel
-            </button>
-          </div>
+          <FormActions busy={busy !== null} error={error} disabled={!canSave} submitLabel="Log Payment" onCancel={onBack} />
         </>
       )}
-    </div>
+    </Form>
   );
 }
 
@@ -1039,7 +976,7 @@ function BulkPaymentForm({
   const [total, setTotal] = useState("");
   const [paidAt, setPaidAt] = useState(todayInput());
   const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
+  const { busy, error, run } = useAsyncAction();
 
   const totalNum = Number(total);
   // Only holdings already purchased by the distribution date are entitled to the coupon —
@@ -1049,42 +986,34 @@ function BulkPaymentForm({
   const totalPrincipal = eligible.reduce((s, h) => s + h.principal, 0);
   const canSave = totalNum > 0 && !!paidAt && eligible.length > 0;
 
-  async function run() {
-    setBusy(true);
-    try { await onSave(totalNum, paidAt, notes); } catch { setBusy(false); }
-  }
-
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave(totalNum, paidAt, notes))}>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Total Amount Received (IDR)</span>
+        <Field label={<>Total Amount Received (IDR)</>}>
           <input
             autoFocus
             type="number"
             placeholder="e.g. 1250000"
             value={total}
             onChange={(e) => setTotal(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Payment Date</span>
+        </Field>
+        <Field label={<>Payment Date</>}>
           <input
             type="date"
             value={paidAt}
             onChange={(e) => setPaidAt(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
+        </Field>
+        <Field optional label="Notes" className="md:col-span-2">
           <input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
+            className={inputCls}
           />
-        </label>
+        </Field>
       </div>
       {totalNum > 0 && totalPrincipal > 0 && (
         <div className="mt-3 rounded-md border border-edge bg-page/50 p-3">
@@ -1107,18 +1036,7 @@ function BulkPaymentForm({
       {totalNum > 0 && totalPrincipal === 0 && (
         <p className="mt-2 text-xs text-tdim">No holdings were purchased by this date — nothing to split.</p>
       )}
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={run}
-          disabled={!canSave || busy}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Log Payment"}
-        </button>
-        <button onClick={onCancel} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-      </div>
-    </div>
+      <FormActions busy={busy !== null} error={error} disabled={!canSave} submitLabel="Log Payment" onCancel={onCancel} />
+    </Form>
   );
 }

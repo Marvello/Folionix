@@ -1,12 +1,30 @@
 // Brand: currency is always written with an explicit code (`IDR 12,450,000`),
-// never a bare symbol, so a multi-currency portfolio is never ambiguous.
+// never a bare symbol, so a multi-currency portfolio is never ambiguous. One
+// locale (en-US: comma thousands, dot decimals) for every money, count and
+// percent figure, and the sign always leads the code (`-IDR 1,234`).
+const LOCALE = "en-US";
+
+/** Plain number in the app locale (lots, grams, units). */
+export const fmtNum = (v: number, maxDecimals = 0): string =>
+  v.toLocaleString(LOCALE, { maximumFractionDigits: maxDecimals });
+
+/** Format an amount in any currency; IDR defaults to 0 dp, others to 2. */
+export function fmtCurrency(
+  v: number | null | undefined,
+  currency = "IDR",
+  decimals?: number,
+): string {
+  if (v == null) return "N/A";
+  const dp = decimals ?? (currency === "IDR" ? 0 : 2);
+  const body = Math.abs(v).toLocaleString(LOCALE, {
+    minimumFractionDigits: dp,
+    maximumFractionDigits: dp,
+  });
+  return `${v < 0 ? "-" : ""}${currency} ${body}`;
+}
+
 export const fmtIdr = (v: number | null | undefined, decimals = 0): string =>
-  v == null
-    ? "N/A"
-    : `IDR ${v.toLocaleString("id-ID", {
-        minimumFractionDigits: decimals,
-        maximumFractionDigits: decimals,
-      })}`;
+  fmtCurrency(v, "IDR", decimals);
 
 /**
  * Compact format for small viewports / metric cards (e.g., IDR 1.2B / IDR 450M
@@ -29,22 +47,21 @@ export function fmtIdrCompact(v: number | null | undefined, prefix = "IDR "): st
   if (abs >= 1_000) {
     return `${sign}${prefix}${(abs / 1_000).toFixed(1)}K`;
   }
-  return `${sign}${prefix}${abs.toLocaleString("id-ID")}`;
+  return `${sign}${prefix}${abs.toLocaleString(LOCALE)}`;
 }
 
-/** Format an amount in any currency. IDR uses id-ID locale (1.234.567); others use en-US (1,234.56). */
-export function fmtCurrency(
-  v: number | null | undefined,
-  currency = "IDR",
-  decimals?: number,
-): string {
-  if (v == null) return "N/A";
-  const dp = decimals ?? (currency === "IDR" ? 0 : 2);
-  const locale = currency === "IDR" ? "id-ID" : "en-US";
-  return `${currency} ${v.toLocaleString(locale, {
-    minimumFractionDigits: dp,
-    maximumFractionDigits: dp,
-  })}`;
+/** Percent with a fixed number of decimals, no sign handling. */
+export const fmtPctAbs = (dp = 1) => (v: number): string => `${v.toFixed(dp)}%`;
+
+/**
+ * Explicit sign for a delta: `+IDR 1,234`, `-IDR 1,234`, `+2.5%`. A value that
+ * renders as zero (incl. -0.4 at 0 dp) gets no sign. `fmt` formats the
+ * absolute value, so every formatter above composes with it.
+ */
+export function fmtSigned(v: number, fmt: (n: number) => string = fmtPctAbs()): string {
+  const body = fmt(Math.abs(v));
+  if (body === fmt(0)) return body;
+  return `${v < 0 ? "-" : "+"}${body}`;
 }
 
 export function fmtWib(dt: string | Date | null | undefined): string {
@@ -107,6 +124,12 @@ export function fmtAgo(dt: string | Date | null | undefined): string {
 }
 
 /** Directional glyph paired with market color so meaning survives grayscale. */
+/** Gain/loss tone for a card; flat (0) stays neutral, matching dirGlyph's ◆. */
+export function tone(n: number | null | undefined): "up" | "down" | undefined {
+  if (n == null || n === 0) return undefined;
+  return n > 0 ? "up" : "down";
+}
+
 export function dirGlyph(n: number | null | undefined): string {
   if (n == null || n === 0) return "◆";
   return n > 0 ? "▲" : "▼";
@@ -120,21 +143,6 @@ export function newestFetchedAt(rows: { fetched_at?: string | null }[]): string 
   );
 }
 
-export interface Pnl {
-  pnl: number;
-  pnlPct: number;
-  totalPnl: number;
-  invested: number;
-}
-
-export function calcPnl(current: number, avg: number, lots = 0): Pnl {
-  const pnl = Math.round(current - avg);
-  const pnlPct = avg ? Math.round((pnl / avg) * 100 * 100) / 100 : 0;
-  const totalPnl = lots ? Math.round(pnl * lots * 100) : 0;
-  const invested = avg && lots ? avg * lots * 100 : 0;
-  return { pnl, pnlPct, totalPnl, invested };
-}
-
 // A recommendation is the machine's opinion, not market fact, so it wears the
 // violet insight-badge (brand: never blend model output into measured fact).
 // Direction is carried by a glyph so BUY/HOLD/SELL still scan at a glance and
@@ -146,11 +154,6 @@ export function recGlyph(rec: string | null | undefined): string {
   if (r.includes("HINDARI") || r.includes("AVOID")) return "▼";
   if (r.includes("TUNGGU") || r.includes("HOLD") || r.includes("TAHAN")) return "◆";
   return "◆";
-}
-
-/** Strip all HTML tags except b, i, code (ports utils.sanitize_html). */
-export function sanitizeHtml(html: string): string {
-  return html.replace(/<(?!\/?(?:b|i|code)(?:\s[^>]*)?>)[^>]+>/g, "");
 }
 
 const decodeEntities = (s: string): string =>

@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { randomUUID } from 'node:crypto'
 import {
   enqueueAnalysisJobs, hasActiveRun, loadPortfolio, saveSnapshot,
-  getLatestSentiment, getLatestAnalysis, saveAnalysis,
+  getLatestSentiment, getLastAlertedAnalysis, saveAnalysis, markAnalysisSent, getKeyStats,
   savePersonaAnalysis, getRunPersonaResults,
 } from '../db/db'
 import { fetchStock } from '../providers/market'
@@ -16,9 +16,9 @@ import {
   aggregateSignals, mapToRecommendation, buildConsensusPrompt,
   enforceRecommendation, type PersonaVote,
 } from '../ai/consensus'
-import { callLlm, cleanForTelegram, extractRecommendation } from '../ai/llm'
+import { callLlmWithModel, cleanForTelegram, extractRecommendation, HELD_RECOMMENDATIONS, WATCHLIST_RECOMMENDATIONS } from '../ai/llm'
 import { sendTelegram } from '../telegram/client'
-import { evaluateAlert } from '../telegram/alerts'
+import { ALERT_FOOTER, evaluateAlert } from '../telegram/alerts'
 import { normalizeTicker } from '../../../lib/format'
 import type { AnalysisJobRow } from '../../../lib/types'
 
@@ -28,6 +28,12 @@ import type { AnalysisJobRow } from '../../../lib/types'
 // time and carried in the job payload so every persona judges identical data.
 
 const SEND_TELEGRAM = process.env.SEND_TELEGRAM !== 'false'
+
+/** "4🟢 1⚪ 1🔴" — readable vote split for the alert header (a raw net score isn't). */
+export function voteSplit(votes: { signal: string }[]): string {
+  const n = (s: string) => votes.filter(v => v.signal === s).length
+  return `${n('bullish')}🟢 ${n('neutral')}⚪ ${n('bearish')}🔴`
+}
 
 export async function enqueueDeepRun(ticker: string): Promise<boolean> {
   const jk = normalizeTicker(ticker)
@@ -42,9 +48,10 @@ export async function enqueueDeepRun(ticker: string): Promise<boolean> {
   const snap = await fetchStock(jk, pos?.avg_price ?? 0, pos?.lots ?? 0, pos?.notes ?? null)
   const snapshotId = await saveSnapshot(snap)
 
-  const [indicators, news] = await Promise.all([
+  const [indicators, news, ks] = await Promise.all([
     computeTickerIndicators(jk),
     getLatestSentiment(jk),
+    getKeyStats(jk),
   ])
   const scores = computeAnalystScores(snap, indicators, news?.score ?? null)
 
@@ -64,6 +71,14 @@ export async function enqueueDeepRun(ticker: string): Promise<boolean> {
     dist_from_high: snap.dist_from_high ?? null,
     dist_from_low: snap.dist_from_low ?? null,
     scores,
+    key_stats: ks
+      ? {
+          forward_pe: ks.forward_pe ?? null, peg_ratio: ks.peg_ratio ?? null,
+          return_on_equity: ks.return_on_equity ?? null, profit_margins: ks.profit_margins ?? null,
+          revenue_growth: ks.revenue_growth ?? null, earnings_growth: ks.earnings_growth ?? null,
+          current_ratio: ks.current_ratio ?? null, free_cashflow: ks.free_cashflow ?? null,
+        }
+      : null,
     news: news
       ? { score: news.score, themes: news.themes ?? null, catalyst: news.catalyst ?? null, risk: news.risk ?? null }
       : null,
@@ -95,7 +110,8 @@ export async function handlePersonaJob(job: AnalysisJobRow): Promise<Record<stri
   if (!payload?.scores) throw new Error('job payload missing scores')
 
   const { system, user } = buildPersonaPrompt(def, payload)
-  const raw = await callLlm(user, { system, temperature: 0.4 })
+  // Temperature 0: the vote decides the verdict, so sampling noise must not flip it.
+  const { text: raw, model } = await callLlmWithModel(user, { system, temperature: 0, maxOutputTokens: 400 })
   const result = parsePersonaResult(raw)
   if (!result) throw new Error(`unparseable persona output: ${raw.slice(0, 120)}`)
 
@@ -107,7 +123,7 @@ export async function handlePersonaJob(job: AnalysisJobRow): Promise<Record<stri
     signal: result.signal,
     confidence: result.confidence,
     reasoning: result.reasoning,
-    model: process.env.LLM_MODEL ?? 'unknown',
+    model,
   })
   return { ...result }
 }
@@ -130,25 +146,24 @@ export async function handleConsensusJob(job: AnalysisJobRow): Promise<Record<st
   const decidedRec = mapToRecommendation(net, payload.held, payload.pnl_pct)
 
   const { system, user } = buildConsensusPrompt(payload, votes, decidedRec)
-  const rendered = await callLlm(user, { system })
+  const { text: rendered, model } = await callLlmWithModel(user, { system })
   const raw = enforceRecommendation(rendered, decidedRec)
   const cleanHtml = cleanForTelegram(raw)
-  const recommendation = extractRecommendation(raw)
+  const recommendation = extractRecommendation(raw, payload.held ? HELD_RECOMMENDATIONS : WATCHLIST_RECOMMENDATIONS)
 
-  const prevAnalysis = await getLatestAnalysis(job.ticker)
-  const alertEval = evaluateAlert(prevAnalysis, recommendation, new Date())
+  const alertEval = evaluateAlert(await getLastAlertedAnalysis(job.ticker), recommendation, new Date())
   // Deep runs are signal-triggered, but a repeat of the same verdict on the
   // same WIB day carries no new information — only alert on a changed
   // recommendation or the first run of a new day.
-  const sent = SEND_TELEGRAM && !alertEval.isSame
-  if (sent) {
-    const header = `<b>${job.ticker.replace('.JK', '')}</b> — ${recommendation} (${votes.length} personas, net ${net})\n\n`
-    await sendTelegram(header + cleanHtml)
-  }
-
-  await saveAnalysis(
-    payload.snapshot_id, job.ticker, `consensus:${process.env.LLM_MODEL ?? 'unknown'}`,
-    raw, cleanHtml, recommendation, sent, alertEval.isSame,
+  // Save before sending and flag `sent` after: a crash between the two leaves an
+  // unsent row (re-alerted on retry via last-alerted dedup), never a silent loss.
+  const analysisId = await saveAnalysis(
+    payload.snapshot_id, job.ticker, `consensus:${model}`,
+    raw, cleanHtml, recommendation, false, alertEval.isSame,
   )
+  const header = `<b>${job.ticker.replace('.JK', '')}</b> — ${recommendation} (${voteSplit(votes)})\n\n`
+  if (SEND_TELEGRAM && !alertEval.isSame && await sendTelegram(header + cleanHtml + ALERT_FOOTER)) {
+    await markAnalysisSent(analysisId)
+  }
   return { net, recommendation, votes: votes.length }
 }

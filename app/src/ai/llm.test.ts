@@ -21,19 +21,47 @@ describe('callLlm', () => {
     const result = await callLlm('Analyze BBCA stock')
     expect(result).toBe('HOLD — market stable.')
   })
+
+  it('bounds every call with a timeout and a single retry layer', async () => {
+    const { streamText } = await import('ai')
+    const { callLlm } = await import('./llm.js')
+    await callLlm('Analyze BBCA stock')
+    const opts = vi.mocked(streamText).mock.calls.at(-1)![0] as { maxRetries: number; timeout: { totalMs: number; chunkMs: number } }
+    expect(opts.maxRetries).toBe(2)
+    expect(opts.timeout.totalMs).toBeGreaterThan(0)
+    expect(opts.timeout.chunkMs).toBeGreaterThan(0)
+  })
+
+  it('falls through to the fallback target when the primary fails', async () => {
+    process.env.LLM_FALLBACK_BACKEND = 'openai'
+    const { streamText } = await import('ai')
+    vi.mocked(streamText)
+      .mockReturnValueOnce({ text: Promise.reject(new Error('timeout')) } as never)
+      .mockReturnValueOnce({ text: Promise.resolve('from fallback') } as never)
+    const { callLlm } = await import('./llm.js')
+    expect(await callLlm('x')).toBe('from fallback')
+    delete process.env.LLM_FALLBACK_BACKEND
+  })
 })
 
 describe('extractRecommendation', () => {
-  it('extracts known keywords', async () => {
+  it('extracts known keywords from the REKOMENDASI line', async () => {
     const { extractRecommendation } = await import('./llm.js')
-    expect(extractRecommendation('This stock: AVERAGE DOWN now')).toBe('AVERAGE DOWN')
-    expect(extractRecommendation('Recommendation: TAKE PROFIT')).toBe('TAKE PROFIT')
-    expect(extractRecommendation('Action: CUT LOSS immediately')).toBe('CUT LOSS')
-    expect(extractRecommendation('Suggest to HOLD position')).toBe('HOLD')
-    expect(extractRecommendation('You should MONITOR closely')).toBe('MONITOR')
-    expect(extractRecommendation('Consider BUY at this level')).toBe('BUY')
-    expect(extractRecommendation('Maybe TRIM some shares')).toBe('TRIM')
-    expect(extractRecommendation('No clear signal here')).toBe('UNKNOWN')
+    for (const kw of ['AVERAGE DOWN', 'TAKE PROFIT', 'CUT LOSS', 'HOLD', 'MONITOR', 'BUY', 'TRIM']) {
+      expect(extractRecommendation(`analysis…\nREKOMENDASI: ${kw}`)).toBe(kw)
+    }
+    expect(extractRecommendation('REKOMENDASI: no clear signal')).toBe('UNKNOWN')
+  })
+
+  it('returns UNKNOWN instead of guessing from prose when the line is missing', async () => {
+    const { extractRecommendation } = await import('./llm.js')
+    expect(extractRecommendation('Not a BUY yet — HOLD for now')).toBe('UNKNOWN')
+  })
+
+  it('rejects a keyword outside the allowed set for the context', async () => {
+    const { extractRecommendation, WATCHLIST_RECOMMENDATIONS } = await import('./llm.js')
+    expect(extractRecommendation('REKOMENDASI: CUT LOSS', WATCHLIST_RECOMMENDATIONS)).toBe('UNKNOWN')
+    expect(extractRecommendation('REKOMENDASI: MONITOR', WATCHLIST_RECOMMENDATIONS)).toBe('MONITOR')
   })
 
   it('prefers the REKOMENDASI line over keywords in the prose', async () => {
@@ -45,7 +73,7 @@ describe('extractRecommendation', () => {
   it('picks the earliest keyword, not the first in list order', async () => {
     const { extractRecommendation } = await import('./llm.js')
     // "HOLD" is earlier in the keyword list than "MONITOR" but appears later here.
-    expect(extractRecommendation('MONITOR closely — do not HOLD yet')).toBe('MONITOR')
+    expect(extractRecommendation('REKOMENDASI: MONITOR closely — do not HOLD yet')).toBe('MONITOR')
     expect(extractRecommendation('REKOMENDASI: BUY, do not HOLD')).toBe('BUY')
   })
 })

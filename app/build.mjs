@@ -12,7 +12,7 @@ await build({
   ],
   bundle: true,
   platform: 'node',
-  target: 'node22',
+  target: 'node24',
   format: 'esm',
   outdir: 'dist',
   packages: 'external',

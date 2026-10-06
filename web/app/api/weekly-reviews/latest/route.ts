@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getPool } from "@/lib/db";
 import type { WeeklyReview } from "@/lib/types";
@@ -6,6 +7,12 @@ import type { WeeklyReview } from "@/lib/types";
 // from a developer machine, so the deployed web app (which holds the pg pool)
 // proxies the latest weekly review behind a static bearer token.
 export const dynamic = "force-dynamic";
+
+// Constant-time compare; hashing first equalizes lengths so length isn't leaked either.
+function safeEqual(a: string, b: string): boolean {
+  const h = (s: string) => createHash("sha256").update(s).digest();
+  return timingSafeEqual(h(a), h(b));
+}
 
 function unauthorized(): NextResponse {
   return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -20,7 +27,7 @@ export async function GET(req: Request): Promise<NextResponse> {
 
   const auth = req.headers.get("authorization") ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  if (token !== expected) return unauthorized();
+  if (!safeEqual(token, expected)) return unauthorized();
 
   const pool = getPool();
   const { rows } = await pool.query(

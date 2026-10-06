@@ -1,6 +1,7 @@
 "use client";
 
-import { fmtWib, fmtWibDate, sanitizeHtml } from "@/lib/format";
+import { sanitizeHtml } from "@folionix/lib";
+import { fmtWib, fmtWibDate } from "@/lib/format";
 import type { Analysis, NewsRow } from "@/lib/types";
 import RecommendationBadge from "@/components/RecommendationBadge";
 import Pager from "@/components/Pager";

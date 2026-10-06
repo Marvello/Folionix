@@ -5,7 +5,7 @@ import {
 } from '../db/db'
 import { fetchCouponSchedule } from '../providers/ksei'
 import { sendTelegram } from '../telegram/client'
-import { fmtIdr, WIB } from '../../../lib/format'
+import { escapeHtml, fmtIdr, WIB } from '../../../lib/format'
 import { estimateCouponNet, inferPaymentsPerYear, latestPaymentByHolding, BOND_COUPON_TAX } from '../../../lib/coupon'
 import type { BondHoldingRow } from '../../../lib/types'
 
@@ -104,7 +104,7 @@ export async function sendCouponReminders(): Promise<void> {
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([series, v]) => {
       grand += v.total
-      return `<b>${series}</b> · ~${fmtIdr(v.total)}${v.count > 1 ? ` (${v.count} holdings)` : ''}`
+      return `<b>${escapeHtml(series)}</b> · ~${fmtIdr(v.total)}${v.count > 1 ? ` (${v.count} holdings)` : ''}`
     })
 
   await sendTelegram(

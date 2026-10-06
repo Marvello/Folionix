@@ -1,50 +1,31 @@
 // app/src/graph/orchestrator.ts
-import { StateGraph, START, END, Annotation } from '@langchain/langgraph'
-import type { OrchestratorState, Session, TickerSignal } from './state'
+// One runner cycle: detect session → refresh prices → check signals → route →
+// analyze or skip. A plain sequence of steps over OrchestratorState (it used to be
+// a LangGraph graph with no checkpointer and a single branch — framework, no gain).
+import type { OrchestratorState, TickerSignal } from './state'
 import { detectSession } from './session'
 import { detectSignalsForTicker, filterCooledSignals } from './signals'
 import { loadPortfolio, getWatchlist, getLatestSnapshots, getSnapshotBefore } from '../db/db'
 import { runPriceRefresh } from '../services/portfolio'
-import { buildAnalysisGraph, decideDepth } from './analysis'
-
-const OrchestratorAnnotation = Annotation.Root({
-  current_session: Annotation<Session>,
-  last_session:    Annotation<Session | null>,
-  last_check:      Annotation<string>,
-  last_scheduled:  Annotation<string | null>,
-  signals:         Annotation<TickerSignal[]>,
-  signal_cooldowns: Annotation<Record<string, string>>,
-  pending_batch:   Annotation<string[]>,
-  last_run:        Annotation<string | null>,
-  last_news_fetch: Annotation<string | null>,
-  _route:          Annotation<string | undefined>,
-})
-
-type OrchestratorAnnotationType = typeof OrchestratorAnnotation.State
+import { runAnalysis, decideDepth } from './analysis'
 
 async function detectSessionNode(
-  state: OrchestratorAnnotationType,
-): Promise<Partial<OrchestratorAnnotationType>> {
+  state: OrchestratorState,
+): Promise<Partial<OrchestratorState>> {
   const session = detectSession()
   return { current_session: session, last_session: state.current_session, last_check: new Date().toISOString() }
 }
 
 async function refreshPricesNode(
-  _state: OrchestratorAnnotationType,
-): Promise<Partial<OrchestratorAnnotationType>> {
+  _state: OrchestratorState,
+): Promise<Partial<OrchestratorState>> {
   await runPriceRefresh()
   return {}
 }
 
-async function fetchNewsNode(
-  _state: OrchestratorAnnotationType,
-): Promise<Partial<OrchestratorAnnotationType>> {
-  return { last_news_fetch: new Date().toISOString() }
-}
-
 async function checkSignalsNode(
-  state: OrchestratorAnnotationType,
-): Promise<Partial<OrchestratorAnnotationType>> {
+  state: OrchestratorState,
+): Promise<Partial<OrchestratorState>> {
   const portfolio = await loadPortfolio()
   const wl = await getWatchlist()
   const tickers = [...new Set([...Object.keys(portfolio), ...wl.map(w => w.ticker)])]
@@ -66,8 +47,8 @@ async function checkSignalsNode(
 }
 
 function routeNode(
-  state: OrchestratorAnnotationType,
-): Partial<OrchestratorAnnotationType> {
+  state: OrchestratorState,
+): Partial<OrchestratorState> {
   const { current_session, last_session, signals } = state
 
   if (current_session === 'CLOSED') {
@@ -109,8 +90,8 @@ function routeNode(
 }
 
 async function runAnalysisNode(
-  state: OrchestratorAnnotationType,
-): Promise<Partial<OrchestratorAnnotationType>> {
+  state: OrchestratorState,
+): Promise<Partial<OrchestratorState>> {
   // pending_batch is non-empty only on the signal route; a cooled MAJOR signal
   // may still sit in state.signals during a scheduled run, so batch decides tier.
   const isSpike = state.pending_batch.length > 0
@@ -137,53 +118,24 @@ async function runAnalysisNode(
     inlineBatch = fallback
   }
 
-  const graph = buildAnalysisGraph()
-  await graph.invoke({
-    tickers: inlineBatch,
+  await runAnalysis(
+    // Signal route analyzes the spiking tickers; scheduled and session-boundary
+    // runs cover the watchlist (held positions get the runner's daily baseline).
+    isSpike ? { kind: 'tickers', tickers: inlineBatch } : { kind: 'watchlist' },
     depth,
-    session: state.current_session,
     // Telegram alerts are spike-only; scheduled/session-boundary runs stay silent
-    alerts: isSpike ? 'spike' as const : 'silent' as const,
-    results: {},
-    errors: {},
-  })
+    isSpike ? 'spike' : 'silent',
+  )
 
   return { last_run: new Date().toISOString(), signals: [] }
 }
 
-async function skipNode(
-  _state: OrchestratorAnnotationType,
-): Promise<Partial<OrchestratorAnnotationType>> {
-  return {}
+/** Run one orchestrator cycle and return the next state. */
+export async function runCycle(state: OrchestratorState): Promise<OrchestratorState> {
+  let next: OrchestratorState = { ...state, ...(await detectSessionNode(state)) }
+  next = { ...next, ...(await refreshPricesNode(next)) }
+  next = { ...next, ...(await checkSignalsNode(next)) }
+  next = { ...next, ...routeNode(next) }
+  if (next._route === 'run_analysis') next = { ...next, ...(await runAnalysisNode(next)) }
+  return next
 }
-
-function routeDecision(state: OrchestratorAnnotationType): string {
-  return state._route ?? 'skip'
-}
-
-export function buildOrchestratorGraph() {
-  const graph = new StateGraph(OrchestratorAnnotation)
-    .addNode('detect_session',  detectSessionNode)
-    .addNode('refresh_prices',  refreshPricesNode)
-    .addNode('fetch_news',      fetchNewsNode)
-    .addNode('check_signals',   checkSignalsNode)
-    .addNode('route',           (s: OrchestratorAnnotationType) => ({ ...routeNode(s) }))
-    .addNode('run_analysis',    runAnalysisNode)
-    .addNode('skip',            skipNode)
-    .addEdge(START, 'detect_session')
-    .addEdge('detect_session', 'refresh_prices')
-    .addEdge('refresh_prices', 'fetch_news')
-    .addEdge('fetch_news', 'check_signals')
-    .addEdge('check_signals', 'route')
-    .addConditionalEdges('route', routeDecision, {
-      run_analysis: 'run_analysis',
-      skip: 'skip',
-    })
-    .addEdge('run_analysis', END)
-    .addEdge('skip', END)
-
-  return graph.compile()
-}
-
-// Re-export for runner.ts compatibility
-export type { OrchestratorState }

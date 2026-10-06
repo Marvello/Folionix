@@ -5,11 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { upsertWatchlistItem, deleteWatchlistItem } from "@/app/actions";
-import { fmtIdr, fmtAgo, dirGlyph, newestFetchedAt, normalizeTicker, displayTicker } from "@/lib/format";
+import { fmtIdr, fmtAgo, fmtPctAbs, newestFetchedAt, normalizeTicker, displayTicker } from "@/lib/format";
 import type { WatchRow, Snapshot, Analysis } from "@/lib/types";
 import RecommendationBadge from "@/components/RecommendationBadge";
 import EmptyState from "@/components/EmptyState";
-import Modal from "@/components/Modal";
+import Modal, { ConfirmDialog } from "@/components/Modal";
+import Delta from "@/components/Delta";
+import { Field, Form, FormActions, PrimaryButton, inputCls, useAsyncAction } from "@/components/Form";
 import { MiniSparkline } from "@/components/Sparkline";
 
 const TICKER_RE = /^[A-Z0-9]{1,10}$/;
@@ -39,35 +41,29 @@ export default function WatchlistClient({
   const [creating, setCreating] = useState(false);
   const [ticker, setTicker] = useState("");
   const [notes, setNotes] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const { busy, error, run } = useAsyncAction();
+  const [removing, setRemoving] = useState<string | null>(null);
 
   function openAdd() {
     setTicker("");
     setNotes("");
-    setErr(null);
     setCreating(true);
   }
 
   async function add() {
     // validate the plain code, store the yahoo symbol (.JK)
     const plain = displayTicker(ticker);
-    setErr(null);
-    if (!TICKER_RE.test(plain)) return setErr(`Invalid ticker: ${plain}`);
+    if (!TICKER_RE.test(plain)) throw new Error(`Invalid ticker: ${plain || "(empty)"}`);
     const t = normalizeTicker(plain);
-    if (portfolio.has(t)) return setErr(`${plain} is already in portfolio.`);
-    if (watch.some((w) => normalizeTicker(w.ticker) === t)) return setErr(`${plain} is already in watchlist.`);
-    setAdding(true);
-    try { await upsertWatchlistItem(t, notes); } catch (e) { setErr(String(e)); setAdding(false); return; }
-    setTicker("");
-    setNotes("");
-    setAdding(false);
+    if (portfolio.has(t)) throw new Error(`${plain} is already in portfolio.`);
+    if (watch.some((w) => normalizeTicker(w.ticker) === t)) throw new Error(`${plain} is already in watchlist.`);
+    await upsertWatchlistItem(t, notes);
     setCreating(false);
     router.refresh();
   }
 
   async function remove(t: string) {
-    try { await deleteWatchlistItem(t); } catch (e) { setErr(String(e)); return; }
+    await deleteWatchlistItem(t);
     router.refresh();
   }
 
@@ -75,60 +71,39 @@ export default function WatchlistClient({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-medium text-tprimary">Watchlist</h1>
-          {fresh && <p className="mt-0.5 text-[11px] text-tdim">synced {fmtAgo(fresh)} · yfinance</p>}
+          <h2 className="text-2xl font-medium text-tprimary">Watchlist</h2>
+          {fresh && <p className="mt-0.5 text-caption text-tdim">synced {fmtAgo(fresh)} · yfinance</p>}
         </div>
-        <button
-          onClick={openAdd}
-          className="flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page"
-        >
+        <PrimaryButton type="button" onClick={openAdd}>
           <Plus size={14} strokeWidth={2} />
           Add Ticker
-        </button>
+        </PrimaryButton>
       </div>
 
       {creating && (
         <Modal title="Add to Watchlist" onClose={() => setCreating(false)}>
-          <div className="grid gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-tdim">Ticker</span>
-              <input
-                placeholder="e.g. BBCA"
-                value={ticker}
-                onChange={(e) => setTicker(e.target.value.toUpperCase())}
-                className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
-              <input
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-              />
-            </label>
-          </div>
-          {err && <p className="mt-3 text-sm text-critical">{err}</p>}
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={add}
-              disabled={adding}
-              className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:opacity-60"
-            >
-              {adding ? "Adding…" : "Add"}
-            </button>
-            <button
-              onClick={() => setCreating(false)}
-              disabled={adding}
-              className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60"
-            >
-              Cancel
-            </button>
-          </div>
+          <Form onSubmit={() => run("save", add)}>
+            <div className="grid gap-3">
+              <Field label="Ticker">
+                <input placeholder="e.g. BBCA" value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())} className={inputCls} />
+              </Field>
+              <Field label="Notes" optional>
+                <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
+              </Field>
+            </div>
+            <FormActions busy={busy !== null} error={error} submitLabel="Add" busyLabel="Adding…" onCancel={() => setCreating(false)} />
+          </Form>
         </Modal>
       )}
 
-      {err && !creating && <p className="text-sm text-critical">{err}</p>}
+      {removing && (
+        <ConfirmDialog
+          title={`Remove ${displayTicker(removing)} from watchlist?`}
+          message="It stops being tracked and analysed. Price history is kept."
+          onConfirm={() => remove(removing)}
+          onClose={() => setRemoving(null)}
+        />
+      )}
 
       {users.length === 0 ? (
         <EmptyState message="Watchlist is empty." />
@@ -146,7 +121,7 @@ export default function WatchlistClient({
                     <Link href={`/stocks?ticker=${displayTicker(t)}`} className="font-medium text-accent hover:underline">{displayTicker(t)}</Link>
                     <div className="flex shrink-0 items-center gap-2">
                       <RecommendationBadge rec={recBy.get(t)} />
-                      <button onClick={() => remove(t)} aria-label={`Remove ${t}`} className="text-tdim hover:text-critical">
+                      <button type="button" onClick={() => setRemoving(t)} aria-label={`Remove ${displayTicker(t)}`} className="p-1 text-tdim hover:text-tprimary">
                         <X size={15} strokeWidth={1.5} />
                       </button>
                     </div>
@@ -156,9 +131,9 @@ export default function WatchlistClient({
                       <span className="text-tdim">Price </span>
                       <span className="num text-tprimary">{s?.current_price ? fmtIdr(s.current_price) : "N/A"}</span>
                     </div>
-                    <div className={day == null ? "text-tdim" : day >= 0 ? "text-up" : "text-down"}>
+                    <div>
                       <span className="text-tdim">Day </span>
-                      <span className="num">{day == null ? "N/A" : `${dirGlyph(day)} ${day >= 0 ? "+" : ""}${day.toFixed(2)}%`}</span>
+                      <Delta value={day} fmt={fmtPctAbs(2)} empty="N/A" />
                     </div>
                   </div>
                 </div>
@@ -170,12 +145,12 @@ export default function WatchlistClient({
           <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[32rem] text-sm">
               <thead>
-                <tr className="text-left text-xs font-semibold text-tdim">
-                  <th className="pb-2 pr-4">TICKER</th>
-                  <th className="pb-2 pr-4">PRICE</th>
-                  <th className="pb-2 pr-4">DAY %</th>
-                  <th className="pb-2 pr-4">TREND</th>
-                  <th className="pb-2 pr-4">VERDICT</th>
+                <tr className="text-xs font-semibold text-tdim">
+                  <th className="pb-2 pr-4 text-left">TICKER</th>
+                  <th className="pb-2 pr-4 text-right">PRICE</th>
+                  <th className="pb-2 pr-4 text-right">DAY %</th>
+                  <th className="pb-2 pr-4 text-right">TREND</th>
+                  <th className="pb-2 pr-4 text-left">VERDICT</th>
                   <th className="pb-2"></th>
                 </tr>
               </thead>
@@ -189,14 +164,12 @@ export default function WatchlistClient({
                       <td className="py-2 pr-4">
                         <Link href={`/stocks?ticker=${displayTicker(t)}`} className="font-medium text-accent hover:underline">{displayTicker(t)}</Link>
                       </td>
-                      <td className="num py-2 pr-4">{s?.current_price ? fmtIdr(s.current_price) : "N/A"}</td>
-                      <td className={`num py-2 pr-4 ${day == null ? "text-tdim" : day >= 0 ? "text-up" : "text-down"}`}>
-                        {day == null ? "N/A" : `${dirGlyph(day)} ${day >= 0 ? "+" : ""}${day.toFixed(2)}%`}
-                      </td>
-                      <td className="py-2 pr-4"><MiniSparkline prices={history[t]} /></td>
+                      <td className="num py-2 pr-4 text-right">{s?.current_price ? fmtIdr(s.current_price) : "N/A"}</td>
+                      <td className="num py-2 pr-4 text-right"><Delta value={day} fmt={fmtPctAbs(2)} empty="N/A" /></td>
+                      <td className="py-2 pr-4 text-right"><MiniSparkline prices={history[t]} /></td>
                       <td className="py-2 pr-4"><RecommendationBadge rec={recBy.get(t)} /></td>
                       <td className="py-2 text-right">
-                        <button onClick={() => remove(t)} aria-label={`Remove ${t}`} className="text-tdim hover:text-critical">
+                        <button type="button" onClick={() => setRemoving(t)} aria-label={`Remove ${displayTicker(t)}`} className="p-1 text-tdim hover:text-tprimary">
                           <X size={15} strokeWidth={1.5} />
                         </button>
                       </td>

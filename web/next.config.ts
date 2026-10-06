@@ -12,6 +12,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Baseline hardening (security checklist #1); TLS terminates at Cloudflare.
+        source: "/:path*",
+        headers: [
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+      {
         source: "/logo/:path*",
         headers: [{ key: "Cache-Control", value: BRAND_ASSET_CACHE }],
       },

@@ -21,15 +21,5 @@ export interface OrchestratorState {
   signal_cooldowns: Record<string, string>
   pending_batch: string[]
   last_run: string | null
-  last_news_fetch: string | null
   _route?: string
-}
-
-export interface AnalysisState {
-  tickers: string[]
-  depth: Depth
-  session: Session
-  alerts: 'spike' | 'dedup' | 'silent'
-  results: Record<string, string>
-  errors: Record<string, string>
 }

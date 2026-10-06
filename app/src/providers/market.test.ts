@@ -62,6 +62,13 @@ describe('fetchStock', () => {
     expect(snap.unrealized_pnl_pct).toBeCloseTo(6.67, 1)
     expect(snap.total_pnl).toBe(600_000)   // 600 * 10 * 100
   })
+
+  it('stores dividend yield as a percent, not yahoo\'s fraction', async () => {
+    quoteMock.mockResolvedValue({ regularMarketPrice: 9600, trailingAnnualDividendYield: 0.025 })
+    const { fetchStock } = await import('./market.js')
+    const snap = await fetchStock('BBCA', 9000, 10, null)
+    expect(snap.div_yield_pct).toBeCloseTo(2.5)
+  })
 })
 
 describe('correctPriceToBook', () => {

@@ -9,9 +9,9 @@ import { priceHistory } from "@/lib/history";
 export default async function StocksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ticker?: string; tab?: string }>;
+  searchParams: Promise<{ ticker?: string; tab?: string; buy?: string }>;
 }) {
-  const { ticker, tab } = await searchParams;
+  const { ticker, tab, buy } = await searchParams;
   if (ticker) return <TickerDetail ticker={ticker} backHref="/stocks" tab={tab} />;
 
   const pool = getPool();
@@ -37,6 +37,7 @@ export default async function StocksPage({
         recs={anaRes.rows as Pick<Analysis, "ticker" | "recommendation">[]}
         history={history}
         dividends={divRes.rows as StockDividend[]}
+        initialBuy={buy}
       />
       <WatchlistClient
         watch={watch}

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { getPool } from "@/lib/db";
-import { displayTicker, fmtIdr, fmtIdrCompact, fmtWibDate, fmtAgo, dirGlyph } from "@/lib/format";
+import { displayTicker, fmtIdr, fmtIdrCompact, fmtSigned, fmtWibDate, fmtAgo, dirGlyph, tone } from "@/lib/format";
 import { aggregatePortfolio } from "@folionix/lib";
 import type { Position, Snapshot, NewsRow, GoldPurchase, GoldPrice, BondHolding, BondCouponSchedule, BondCouponPayment, FundPurchase, FundNav, StockTransaction, StockDividend, DividendSchedule } from "@/lib/types";
 import { buildCalendarEvents } from "@/lib/calendarEvents";
 import MetricCard from "@/components/MetricCard";
 import ActivityCalendar from "@/components/ActivityCalendar";
+import Delta from "@/components/Delta";
 
 export default async function DashboardPage() {
   const pool = getPool();
@@ -85,16 +86,18 @@ export default async function DashboardPage() {
     accountCharges: chgRes.rows as { amount: number }[],
   });
 
-  // Color per product — hex avoids Tailwind purge issues with dynamic class names
+  // Non-semantic allocation tokens (globals.css --color-product-*): never the
+  // gain/loss/signal/brand hues, so a bar segment never reads as a market state.
   const PRODUCT_COLOR: Record<string, string> = {
-    Stocks: "#22d3ee",   // cyan
-    Gold: "#fbbf24",     // amber
-    Bonds: "#a78bfa",    // violet
-    Funds: "#34d399",    // emerald
+    Stocks: "var(--color-product-stocks)",
+    Gold: "var(--color-product-gold)",
+    Bonds: "var(--color-product-bonds)",
+    Funds: "var(--color-product-funds)",
   };
 
   return (
     <div className="space-y-6">
+      <h1 className="sr-only">Dashboard</h1>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5 sm:gap-4">
         <MetricCard
           label="Net Worth"
@@ -104,11 +107,11 @@ export default async function DashboardPage() {
         />
         <MetricCard
           label="Capital"
-          value={`${totalCapital >= 0 ? "+" : ""}${fmtIdrCompact(totalCapital)}`}
-          fullValue={`${totalCapital >= 0 ? "+" : ""}${fmtIdr(totalCapital)}`}
-          color={totalCapital >= 0 ? "up" : "down"}
+          value={fmtSigned(totalCapital, fmtIdrCompact)}
+          fullValue={fmtSigned(totalCapital, fmtIdr)}
+          color={tone(totalCapital)}
           glyph={dirGlyph(totalCapital)}
-          sub={`Unreal. ${combinedPnl >= 0 ? "+" : ""}${fmtIdrCompact(combinedPnl)} · Real. ${totalRealized >= 0 ? "+" : ""}${fmtIdrCompact(totalRealized)}`}
+          sub={`Unreal. ${fmtSigned(combinedPnl, fmtIdrCompact)} · Real. ${fmtSigned(totalRealized, fmtIdrCompact)}`}
         />
         <MetricCard
           label="Income"
@@ -120,17 +123,17 @@ export default async function DashboardPage() {
         />
         <MetricCard
           label="Fees"
-          value={totalCharges > 0 ? `-${fmtIdrCompact(totalCharges)}` : fmtIdrCompact(0)}
-          fullValue={totalCharges > 0 ? `-${fmtIdr(totalCharges)}` : fmtIdr(0)}
+          value={fmtSigned(-totalCharges, fmtIdrCompact)}
+          fullValue={fmtSigned(-totalCharges, fmtIdr)}
           color={totalCharges > 0 ? "down" : undefined}
           glyph={dirGlyph(-totalCharges)}
           sub="Data + stamp + late fees"
         />
         <MetricCard
           label="Total Return"
-          value={`${totalReturn >= 0 ? "+" : ""}${fmtIdrCompact(totalReturn)}`}
-          fullValue={`${totalReturn >= 0 ? "+" : ""}${fmtIdr(totalReturn)}`}
-          color={totalReturn >= 0 ? "up" : "down"}
+          value={fmtSigned(totalReturn, fmtIdrCompact)}
+          fullValue={fmtSigned(totalReturn, fmtIdr)}
+          color={tone(totalReturn)}
           glyph={dirGlyph(totalReturn)}
           sub="Capital + Income − Fees"
         />
@@ -153,7 +156,7 @@ export default async function DashboardPage() {
                       ),
                   )}
                 </div>
-                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-tdim">
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-caption text-tdim">
                   {products.map(
                     (pr) =>
                       pr.value > 0 && (
@@ -189,7 +192,7 @@ export default async function DashboardPage() {
                   return (
                     <tr key={pr.name} className="border-t border-edge">
                       <td className="py-2 pr-4 font-medium text-tprimary">
-                        <span className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-2">
                           <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: PRODUCT_COLOR[pr.name] }} />
                           {pr.name}
                         </span>
@@ -197,18 +200,12 @@ export default async function DashboardPage() {
                       <td className="num py-2 pr-6 text-right">{hasValue ? fmtIdr(pr.value) : "N/A"}</td>
                       <td className="num py-2 pr-6 text-right">
                         <span className={pr.income > 0 ? "text-up" : "text-tdim"}>
-                          {pr.income > 0 ? `+${fmtIdr(pr.income)}` : "—"}
+                          {pr.income > 0 ? fmtSigned(pr.income, fmtIdr) : "—"}
                         </span>
                       </td>
                       <td className="num whitespace-nowrap py-2 text-right">
-                        <span className={!hasValue ? "text-tdim" : pr.pnl >= 0 ? "text-up" : "text-down"}>
-                          {!hasValue ? "N/A" : `${dirGlyph(pr.pnl)} ${pr.pnl >= 0 ? "+" : ""}${fmtIdr(pr.pnl)}`}
-                        </span>{" "}
-                        {pct != null && hasValue && (
-                          <span className={pct >= 0 ? "text-up" : "text-down"}>
-                            {`(${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`}
-                          </span>
-                        )}
+                        <Delta value={hasValue ? pr.pnl : null} fmt={fmtIdr} empty="N/A" />
+                        {pct != null && hasValue && <Delta value={pct} paren glyph={false} className="ml-1 text-xs" />}
                       </td>
                     </tr>
                   );
@@ -220,17 +217,13 @@ export default async function DashboardPage() {
                   <td className="num py-2 pr-6 text-right">{netWorth > 0 ? fmtIdr(netWorth) : "N/A"}</td>
                   <td className="num py-2 pr-6 text-right">
                     <span className={totalIncome > 0 ? "text-up" : "text-tdim"}>
-                      {totalIncome > 0 ? `+${fmtIdr(totalIncome)}` : "—"}
+                      {totalIncome > 0 ? fmtSigned(totalIncome, fmtIdr) : "—"}
                     </span>
                   </td>
                   <td className="num whitespace-nowrap py-2 text-right">
-                    <span className={netWorth <= 0 ? "text-tdim" : combinedPnl >= 0 ? "text-up" : "text-down"}>
-                      {netWorth <= 0 ? "N/A" : `${dirGlyph(combinedPnl)} ${combinedPnl >= 0 ? "+" : ""}${fmtIdr(combinedPnl)}`}
-                    </span>{" "}
+                    <Delta value={netWorth > 0 ? combinedPnl : null} fmt={fmtIdr} empty="N/A" />
                     {totalProductCost > 0 && netWorth > 0 && (
-                      <span className={combinedPnl >= 0 ? "text-up" : "text-down"}>
-                        {`(${combinedPnl >= 0 ? "+" : ""}${((combinedPnl / totalProductCost) * 100).toFixed(1)}%)`}
-                      </span>
+                      <Delta value={(combinedPnl / totalProductCost) * 100} paren glyph={false} className="ml-1 text-xs" />
                     )}
                   </td>
                 </tr>

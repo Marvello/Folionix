@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { getPool } from "@/lib/db";
-import { displayTicker, fmtWib, fmtAgo, dirGlyph, parseSummary, newsCutoffIso } from "@/lib/format";
+import { displayTicker, fmtWib, fmtAgo, fmtSigned, dirGlyph, parseSummary, newsCutoffIso } from "@/lib/format";
 import type { NewsRow, Position, WatchRow } from "@/lib/types";
 import NewsList from "@/components/NewsList";
 
@@ -73,8 +73,7 @@ export default async function NewsPage({
               </span>
               {n.sentiment_score != null && (
                 <span className="num text-sm font-semibold text-ai-bright">
-                  {dirGlyph(n.sentiment_score)} sentiment {n.sentiment_score >= 0 ? "+" : ""}
-                  {n.sentiment_score}
+                  {dirGlyph(n.sentiment_score)} sentiment {fmtSigned(n.sentiment_score, String)}
                 </span>
               )}
             </div>
@@ -83,7 +82,7 @@ export default async function NewsPage({
               {n.catalyst && <InsightRow term="Catalyst" desc={n.catalyst} />}
               {n.risk && <InsightRow term="Risk" desc={n.risk} />}
             </dl>
-            <p className="mt-3 text-[11px] text-tdim">
+            <p className="mt-3 text-caption text-tdim">
               Latest model sentiment for {label} · not measured fact
             </p>
           </section>

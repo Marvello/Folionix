@@ -44,12 +44,13 @@ export default function NewsList({
         <div>
           <h1 className="text-2xl font-medium text-tprimary">News</h1>
           {newest && (
-            <p className="mt-0.5 text-[11px] text-tdim">
+            <p className="mt-0.5 text-caption text-tdim">
               updated {fmtAgo(newest)} · {items.length} items
             </p>
           )}
         </div>
         <select
+          aria-label="Filter news"
           value={selected}
           onChange={(e) => onFilter(e.target.value)}
           className="rounded-md border border-edge bg-component px-3 py-1.5 text-sm text-tprimary"
@@ -73,7 +74,7 @@ export default function NewsList({
             return (
               <li key={n.id} className="flex gap-4 p-4 transition-colors hover:bg-page/40">
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex items-center gap-2 text-[11px] text-tdim">
+                  <div className="mb-1 flex items-center gap-2 text-caption text-tdim">
                     <TickerChip ticker={n.ticker} />
                     <span>{n.source}</span>
                     {n.published_at && (

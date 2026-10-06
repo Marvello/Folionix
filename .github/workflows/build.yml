@@ -5,13 +5,16 @@
 # Repo secrets (Settings → Secrets and variables → Actions):
 #   DOCKERHUB_USERNAME    — Docker Hub username (marvellooni)
 #   DOCKERHUB_TOKEN       — Docker Hub access token (read/write)
-#   NPM_TOKEN             — Classic PAT with read:packages (GitHub Packages auth)
 # Deployment is outside this workflow: it only publishes the :latest / :<sha8> images.
 # NEXT_PUBLIC_* are not needed: the web image reads them at runtime.
 
 name: build
 
 on:
+  # PRs run only the test jobs (build/merge are push-only below) — nothing is
+  # published until main, and main IS the deploy (prod pulls :latest).
+  pull_request:
+    branches: [main]
   push:
     branches: [main]
     # Skip the whole workflow when a push touches ONLY these paths.
@@ -27,12 +30,15 @@ on:
 jobs:
   # Decide which image(s) changed. The workflow file itself rebuilds both.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      pull-requests: read   # paths-filter lists PR files through the API
     outputs:
       app: ${{ steps.filter.outputs.app }}
       web: ${{ steps.filter.outputs.web }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -40,10 +46,16 @@ jobs:
             app:
               - 'app/**'
               - 'lib/**'
+              - 'db/**'
+              - 'package.json'
+              - 'package-lock.json'
               - 'docker/Dockerfile.app'
               - '.github/workflows/build.yml'
             web:
               - 'web/**'
+              - 'lib/**'
+              - 'package.json'
+              - 'package-lock.json'
               - 'docker/Dockerfile.web'
               - '.github/workflows/build.yml'
 
@@ -51,35 +63,54 @@ jobs:
   test-app:
     needs: changes
     if: ${{ needs.changes.outputs.app == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
+    # Throwaway Postgres: proves schema.sql + every migration apply cleanly (no
+    # drift) and runs the live-DB tests (src/db/*.integration.test.ts).
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: folionix
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: folionix
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U folionix" --health-interval 2s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql://folionix:ci@localhost:5432/folionix
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
       - run: npm ci
         working-directory: app
       - run: npx tsc --noEmit
         working-directory: app
+      - name: Load schema.sql and apply migrations
+        run: |
+          psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f db/schema.sql
+          DATABASE_URL="$TEST_DATABASE_URL" npm run migrate --workspace app
+          DATABASE_URL="$TEST_DATABASE_URL" npm run migrate --workspace app -- --check
       - run: npx vitest run
         working-directory: app
 
   build-app:
     needs: test-app
+    if: ${{ github.event_name == 'push' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-26.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -94,7 +125,6 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           build-args: |
             GIT_COMMIT=${{ github.sha }}
-            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
           outputs: type=image,name=marvellooni/folionix-app,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=app-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=app-${{ matrix.arch }}
@@ -111,7 +141,7 @@ jobs:
 
   merge-app:
     needs: build-app
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@v8
         with:
@@ -136,16 +166,19 @@ jobs:
   test-web:
     needs: changes
     if: ${{ needs.changes.outputs.web == 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      - run: echo "//npm.pkg.github.com/:_authToken=${{ secrets.NPM_TOKEN }}" >> .npmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
       - run: npm ci
+        working-directory: web
+      - run: npx tsc --noEmit
         working-directory: web
       - run: npm test
         working-directory: web
@@ -154,17 +187,18 @@ jobs:
 
   build-web:
     needs: test-web
+    if: ${{ github.event_name == 'push' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: amd64
-            runner: ubuntu-latest
+            runner: ubuntu-26.04
           - arch: arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -183,7 +217,6 @@ jobs:
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             BUILD_DATE=${{ steps.bd.outputs.date }}
-            NPM_TOKEN=${{ secrets.NPM_TOKEN }}
           outputs: type=image,name=marvellooni/folionix-web,push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha,scope=web-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=web-${{ matrix.arch }}
@@ -200,7 +233,7 @@ jobs:
 
   merge-web:
     needs: build-web
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@v8
         with:

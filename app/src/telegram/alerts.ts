@@ -1,5 +1,8 @@
 import { WIB } from '../../../lib/format'
 
+/** Appended in code (never left to the model) to every recommendation alert. */
+export const ALERT_FOOTER = '\n\n<i>Automated analysis, not financial advice.</i>'
+
 interface PrevAnalysis {
   recommendation?: string | null
   analysed_at?: string

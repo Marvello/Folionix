@@ -87,7 +87,8 @@ function valuationScore(snap: StockSnapshotRow): SubScore {
 }
 
 function sentimentScoreOf(newsScore: number | null): SubScore {
-  if (newsScore == null) return { score: 0, rationale: 'no recent news sentiment' }
+  // No news is no data — a fake 0 would dilute the composite by a quarter.
+  if (newsScore == null) return NO_DATA
   // news_sentiments.score is -5..5
   return {
     score: clamp(newsScore * 20),

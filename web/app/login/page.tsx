@@ -49,7 +49,7 @@ export default function LoginPage() {
           className="mb-6 h-auto w-40"
         />
         {hasError && (
-          <p className="mb-4 text-sm text-critical">
+          <p role="alert" className="mb-4 text-sm text-critical">
             Sign-in failed. Check your email and password.
           </p>
         )}
@@ -61,7 +61,7 @@ export default function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             required
             autoComplete="email"
-            className="w-full rounded-md border border-edge bg-page px-3 py-2 text-sm outline-none focus:border-btn"
+            className="w-full rounded-md border border-edge bg-page px-3 py-2 text-sm focus:border-btn"
           />
         </label>
         <label className="mb-5 block">
@@ -72,13 +72,13 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             autoComplete="current-password"
-            className="w-full rounded-md border border-edge bg-page px-3 py-2 text-sm outline-none focus:border-btn"
+            className="w-full rounded-md border border-edge bg-page px-3 py-2 text-sm focus:border-btn"
           />
         </label>
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-md bg-btn px-3 py-2 font-semibold text-page disabled:opacity-60"
+          className="h-10 w-full rounded-sm bg-btn px-5 text-xs font-semibold tracking-[0.04em] text-page hover:bg-btn-hover disabled:opacity-60"
         >
           {loading ? "Signing in…" : "Sign in"}
         </button>

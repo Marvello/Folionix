@@ -7,7 +7,8 @@ import { insertAccountCharge, deleteAccountCharge } from "@/app/actions";
 import { fmtIdr, fmtWibDate } from "@/lib/format";
 import type { AccountCharge } from "@/lib/types";
 import EmptyState from "@/components/EmptyState";
-import Modal from "@/components/Modal";
+import Modal, { ConfirmDialog } from "@/components/Modal";
+import { Field, Form, FormActions, PrimaryButton, inputCls, useAsyncAction } from "@/components/Form";
 import Pager from "@/components/Pager";
 import { usePaged } from "@/lib/usePaged";
 
@@ -23,22 +24,19 @@ const CHARGE_LABEL: Record<AccountCharge["type"], string> = {
 export default function AccountChargesClient({ charges }: { charges: AccountCharge[] }) {
   const router = useRouter();
   const [creating, setCreating] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<AccountCharge | null>(null);
 
   const totalCharges = charges.reduce((sum, c) => sum + (c.amount ?? 0), 0);
   const { page, setPage, totalPages, pageItems } = usePaged(charges);
 
   async function save(chargedAt: string, type: AccountCharge["type"], amount: string, notes: string) {
-    try {
-      await insertAccountCharge({ charged_at: chargedAt, type, amount: Number(amount) || 0, notes });
-    } catch (e) { setErr(String(e)); throw e; }
+    await insertAccountCharge({ charged_at: chargedAt, type, amount: Number(amount) || 0, notes });
     setCreating(false);
-    setErr(null);
     router.refresh();
   }
 
   async function remove(id: number) {
-    try { await deleteAccountCharge(id); } catch (e) { setErr(String(e)); return; }
+    await deleteAccountCharge(id);
     router.refresh();
   }
 
@@ -46,19 +44,23 @@ export default function AccountChargesClient({ charges }: { charges: AccountChar
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-medium text-tprimary">Account Charges</h1>
-          <p className="mt-0.5 text-[11px] text-tdim">Total {fmtIdr(totalCharges)}</p>
+          <h2 className="text-2xl font-medium text-tprimary">Account Charges</h2>
+          <p className="mt-0.5 text-caption text-tdim">Total {fmtIdr(totalCharges)}</p>
         </div>
-        <button
-          onClick={() => { setCreating(true); setErr(null); }}
-          className="flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page"
-        >
+        <PrimaryButton type="button" onClick={() => setCreating(true)}>
           <Plus size={14} strokeWidth={2} />
           Add Charge
-        </button>
+        </PrimaryButton>
       </div>
 
-      {err && <p className="text-sm text-critical">{err}</p>}
+      {removing && (
+        <ConfirmDialog
+          title="Remove charge?"
+          message={`${CHARGE_LABEL[removing.type]} of ${fmtIdr(removing.amount)} on ${fmtWibDate(removing.charged_at)} is deleted permanently.`}
+          onConfirm={() => remove(removing.id!)}
+          onClose={() => setRemoving(null)}
+        />
+      )}
 
       {creating && (
         <Modal title="Add Charge" onClose={() => setCreating(false)}>
@@ -89,8 +91,9 @@ export default function AccountChargesClient({ charges }: { charges: AccountChar
                 {c.notes && <p className="mt-2 text-xs text-tmuted">{c.notes}</p>}
                 <div className="mt-2.5 flex justify-end border-t border-edge/50 pt-2">
                   <button
-                    onClick={() => c.id != null && remove(c.id)}
-                    className="rounded px-2 py-1 text-xs font-medium text-down hover:bg-page"
+                    type="button"
+                    onClick={() => c.id != null && setRemoving(c)}
+                    className="rounded px-2 py-1 text-xs font-medium text-tmuted hover:bg-page hover:text-tprimary"
                   >
                     Remove
                   </button>
@@ -120,8 +123,9 @@ export default function AccountChargesClient({ charges }: { charges: AccountChar
                     <td className="py-2 pr-4 text-tmuted">{c.notes || "—"}</td>
                     <td className="py-2 text-right">
                       <button
-                        onClick={() => c.id != null && remove(c.id)}
-                        className="text-xs text-down hover:underline"
+                        type="button"
+                        onClick={() => c.id != null && setRemoving(c)}
+                        className="text-xs text-tmuted hover:text-tprimary hover:underline"
                       >
                         Remove
                       </button>
@@ -149,53 +153,29 @@ function ChargeForm({
   const [type, setType] = useState<AccountCharge["type"]>("DATA_FEE");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const cls = "rounded-md border border-edge bg-page px-3 py-2 text-tprimary";
-
-  async function submit() {
-    setBusy(true);
-    try {
-      await onSave({ chargedAt, type, amount, notes });
-    } catch {
-      setBusy(false); // failure: re-enable so the user can retry
-    }
-  }
+  const { busy, error, run } = useAsyncAction();
 
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave({ chargedAt, type, amount, notes }))}>
       <div className="grid gap-3 md:grid-cols-2">
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Date</span>
-          <input type="date" value={chargedAt} onChange={(e) => setChargedAt(e.target.value)} className={cls} />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Type</span>
-          <select value={type} onChange={(e) => setType(e.target.value as AccountCharge["type"])} className={cls}>
+        <Field label="Date">
+          <input type="date" value={chargedAt} onChange={(e) => setChargedAt(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Type">
+          <select value={type} onChange={(e) => setType(e.target.value as AccountCharge["type"])} className={inputCls}>
             {CHARGE_TYPES.map((t) => (
               <option key={t} value={t}>{CHARGE_LABEL[t]}</option>
             ))}
           </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Amount (IDR)</span>
-          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className={cls} />
-        </label>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={cls} />
-        </label>
+        </Field>
+        <Field label="Amount (IDR)">
+          <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} />
+        </Field>
+        <Field label="Notes" optional className="md:col-span-2">
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
+        </Field>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={submit}
-          disabled={busy}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:opacity-60"
-        >
-          {busy ? "Saving…" : "Save"}
-        </button>
-        <button onClick={onCancel} disabled={busy} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">Cancel</button>
-      </div>
-    </div>
+      <FormActions busy={busy !== null} error={error} onCancel={onCancel} />
+    </Form>
   );
 }

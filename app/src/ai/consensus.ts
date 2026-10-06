@@ -32,10 +32,12 @@ export function mapToRecommendation(net: number, held: boolean, pnlPct: number |
   }
   const inLoss = pnlPct != null && pnlPct < -2
   const inProfit = pnlPct != null && pnlPct > 2
-  if (net >= 40) return inLoss ? 'AVERAGE DOWN' : 'BUY'
+  // Adding to a losing position needs a clearly stronger consensus than buying.
+  if (net >= 40) return inLoss ? (net >= 60 ? 'AVERAGE DOWN' : 'HOLD') : 'BUY'
   if (net >= -15) return 'HOLD'
   if (net > -40) return inProfit ? 'TRIM' : 'MONITOR'
-  return inLoss ? 'CUT LOSS' : 'TAKE PROFIT'
+  // Strongly bearish: TAKE PROFIT only when there is profit to take.
+  return inProfit ? 'TAKE PROFIT' : inLoss ? 'CUT LOSS' : 'TRIM'
 }
 
 const fmt = (n: number | null | undefined, digits = 1): string =>

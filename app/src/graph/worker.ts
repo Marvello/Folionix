@@ -9,7 +9,8 @@ import {
 import type { AnalysisJobRow } from '../../../lib/types'
 import { runPendingMigrations } from '../db/migrate'
 
-const POLL_MS      = Number(process.env.WORKER_POLL_SEC ?? 10) * 1000
+// An empty or non-numeric value must not become a 0ms busy loop against the DB.
+const POLL_MS      = (Number(process.env.WORKER_POLL_SEC) > 0 ? Number(process.env.WORKER_POLL_SEC) : 10) * 1000
 const MAX_ATTEMPTS = Number(process.env.WORKER_MAX_ATTEMPTS ?? 3)
 const STALE_MIN    = Number(process.env.DEEP_RUN_STALE_MIN ?? 120)
 
@@ -35,6 +36,11 @@ export async function dispatchJob(job: AnalysisJobRow, deps: WorkerDeps): Promis
 
 let running = true
 
+function fatal(err: unknown): never {
+  console.error('[worker] fatal:', err)
+  process.exit(1)
+}
+
 process.on('SIGTERM', () => {
   console.log('[worker] SIGTERM received — shutting down after current job')
   running = false
@@ -51,7 +57,15 @@ async function main(): Promise<void> {
       console.error('[worker] stale-job requeue error:', err)
     }
   }
-  await sweepStale()
+  // Boot: nothing of ours is running yet, so every 'running' job was orphaned by
+  // the previous process (deploy SIGKILL, crash) — requeue them all now instead of
+  // blocking those tickers for STALE_MIN.
+  // ponytail: assumes a single worker replica; give jobs a worker id + heartbeat if that changes.
+  try {
+    await requeueStaleJobs(0, MAX_ATTEMPTS)
+  } catch (err) {
+    console.error('[worker] boot requeue error:', err)
+  }
   // Sweeping only at boot leaves a job stranded 'running' for as long as this
   // process stays up (a crashed run blocks its ticker via hasActiveRun), so
   // re-sweep on idle too.
@@ -98,8 +112,8 @@ if (process.argv[1]?.endsWith('worker.ts') || process.argv[1]?.endsWith('worker.
     import('../services/deepRun.js')
       .then(({ enqueueDeepRun }) => enqueueDeepRun(process.argv[enqueueIdx + 1]))
       .then(() => main())
-      .catch(console.error)
+      .catch(fatal)
   } else {
-    main().catch(console.error)
+    main().catch(fatal)
   }
 }

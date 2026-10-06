@@ -10,7 +10,13 @@ const CACHE_MINUTES = Number(process.env.CACHE_MINUTES ?? 15)
 
 // v3 exports the YahooFinance class as default; one shared instance keeps the
 // cookie/crumb jar warm across tickers.
-const yf = new YahooFinance({ suppressNotices: ['yahooSurvey'] })
+// yahoo-finance2 sets no request timeout; give every fetch its own so a stalled
+// connection can't hang the runner loop.
+const YAHOO_TIMEOUT_MS = 20_000
+const yf = new YahooFinance({
+  suppressNotices: ['yahooSurvey'],
+  fetch: (url, init) => fetch(url, { ...init, signal: init?.signal ?? AbortSignal.timeout(YAHOO_TIMEOUT_MS) }),
+})
 
 /**
  * Yahoo divides an IDR share price by a book value per share reported in the
@@ -71,7 +77,7 @@ export async function fetchStock(
     if (cached?.fetched_at) {
       const age = (Date.now() - new Date(cached.fetched_at).getTime()) / 60_000
       if (age < CACHE_MINUTES) {
-        const { id: _id, fetched_at: _fetched, ...snap } = cached
+        const { fetched_at: _fetched, ...snap } = cached   // keep id: saveSnapshot reuses the row
         return snap as unknown as SnapshotInput
       }
     }
@@ -149,8 +155,8 @@ export async function fetchStock(
         price = fb.c
         dayChange = fb.d
         dayChangePct = fb.dp
-        high52w = fb.h
-        low52w = fb.l
+        // fb.h / fb.l are Finnhub's DAY high/low, not a 52-week range: leave the
+        // 52w fields null rather than corrupt dist_from_high/low downstream.
       } else {
         console.warn(`[market] rejected implausible Finnhub fallback for ${jkTicker}: ${fb.c} vs last ${ref}`)
       }
@@ -185,7 +191,8 @@ export async function fetchStock(
     market_cap_raw: marketCap,
     pe: peRatio,
     pb: pbRatio,
-    div_yield_pct: dividendYield,
+    // yahoo's trailingAnnualDividendYield is a fraction (0.05); the column is a percent (5).
+    div_yield_pct: dividendYield != null ? dividendYield * 100 : null,
     volume,
     lots,
     avg_price: avgPrice,

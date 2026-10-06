@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   safeFloat, fmtIdr, fmtCap, calcPnl, pnlIcon,
-  normalizeTicker, sanitizeHtml, valueHolding, wibDateOffset,
+  normalizeTicker, sanitizeHtml, escapeHtml, valueHolding, wibDateOffset,
 } from './format'
 
 describe('safeFloat', () => {
@@ -77,6 +77,27 @@ describe('normalizeTicker', () => {
 describe('sanitizeHtml', () => {
   it('strips disallowed tags', () => {
     expect(sanitizeHtml('<b>bold</b><script>evil()</script>')).toBe('<b>bold</b>')
+  })
+  it('drops attributes from allowed tags', () => {
+    expect(sanitizeHtml('<b onmouseover="alert(1)">x</b> <i style="position:fixed" onclick=y>z</i>'))
+      .toBe('<b>x</b> <i>z</i>')
+  })
+  it('removes links and unknown tags but keeps their text', () => {
+    expect(sanitizeHtml('<a href="https://evil">click</a> <img src=x onerror=alert(1)><em>t</em>'))
+      .toBe('click t')
+  })
+  it('escapes bare < and & so Telegram can parse it', () => {
+    expect(sanitizeHtml('RSI < 30 & P/E <10 > x')).toBe('RSI &lt; 30 &amp; P/E &lt;10 &gt; x')
+  })
+  it('is idempotent', () => {
+    const once = sanitizeHtml('<b class=a>R&D</b> 1 < 2 &amp; <a href=x>y</a>')
+    expect(sanitizeHtml(once)).toBe(once)
+  })
+})
+
+describe('escapeHtml', () => {
+  it('escapes and keeps existing entities', () => {
+    expect(escapeHtml('a<b>&amp;&c')).toBe('a&lt;b&gt;&amp;&amp;c')
   })
 })
 

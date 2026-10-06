@@ -8,7 +8,7 @@ const mockConnect = vi.fn().mockResolvedValue({
 
 vi.mock('pg', () => {
   function Pool() {
-    return { query: mockQuery, connect: mockConnect }
+    return { query: mockQuery, connect: mockConnect, on: () => {} }
   }
   return { default: { Pool, types: { setTypeParser: () => {} } } }
 })
@@ -18,11 +18,11 @@ process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test'
 describe('db', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('upsertPosition calls pg query', async () => {
-    const { upsertPosition } = await import('./db.js')
-    await upsertPosition('BBCA', 9500, 10, null)
-    expect(mockQuery).toHaveBeenCalled()
-    expect(mockQuery.mock.calls[0][0]).toContain('portfolio_positions')
+  it('addStockTransaction writes the ledger, not the positions cache', async () => {
+    const { addStockTransaction } = await import('./db.js')
+    await addStockTransaction({ ticker: 'BBCA.JK', side: 'BUY', lots: 10, price: 9500, fee: 0, txn_at: '2026-10-06T00:00:00Z', notes: '' })
+    expect(mockQuery.mock.calls[0][0]).toContain('stock_transactions')
+    expect(mockQuery.mock.calls[0][0]).not.toContain('portfolio_positions')
   })
 
   it('saveSnapshot returns id', async () => {
@@ -38,17 +38,20 @@ describe('db', () => {
     expect(id).toBe(42)
   })
 
-  it('saveSnapshot drops server-owned columns from a full row', async () => {
+  it('saveSnapshot reuses a cached row instead of re-inserting it', async () => {
+    const { saveSnapshot } = await import('./db.js')
+    const id = await saveSnapshot({ id: 7, fetched_at: '2026-08-21T07:00:00Z', ticker: 'BBCA', current_price: 9500 } as never)
+    expect(id).toBe(7)
+    expect(mockQuery).not.toHaveBeenCalled()
+  })
+
+  it('saveSnapshot stamps fetched_at itself on a fresh snapshot', async () => {
     mockQuery.mockResolvedValueOnce({ rows: [{ id: 43 }] })
     const { saveSnapshot } = await import('./db.js')
-    await saveSnapshot({
-      id: 7, fetched_at: '2026-08-21T07:00:00Z',
-      ticker: 'BBCA', current_price: 9500,
-    } as never)
+    await saveSnapshot({ fetched_at: '2026-08-21T07:00:00Z', ticker: 'BBCA', current_price: 9500 } as never)
     const sql = mockQuery.mock.calls[0][0] as string
     const cols = sql.slice(sql.indexOf('(') + 1, sql.indexOf(')')).split(',').map(c => c.trim())
     expect(cols.filter(c => c === 'fetched_at')).toHaveLength(1)
-    expect(cols).not.toContain('id')
   })
 
   it('requeueStaleJobs errors out attempt-exhausted running jobs', async () => {
@@ -267,4 +270,34 @@ describe('db', () => {
     expect(params).toEqual(['BBCA', 'SPLIT', '2026-05-01', null, null, '{}', 'yahoo'])
   })
 
+
+  it('enqueues a whole deep run in one statement', async () => {
+    const { enqueueAnalysisJobs } = await import('./db.js')
+    const run = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    await enqueueAnalysisJobs([
+      { ticker: 'BBCA.JK', kind: 'persona', persona: 'buffett', run_id: run },
+      { ticker: 'BBCA.JK', kind: 'consensus', run_id: run },
+    ])
+    expect(mockQuery).toHaveBeenCalledTimes(1)
+    expect(JSON.parse((mockQuery.mock.calls[0][1] as string[])[0])).toHaveLength(2)
+  })
+
+  it('treats a duplicate active run as "already running"', async () => {
+    mockQuery.mockRejectedValueOnce(Object.assign(new Error('dup'), { code: '23505' }))
+    const { enqueueAnalysisJobs } = await import('./db.js')
+    expect(await enqueueAnalysisJobs([{ ticker: 'X.JK', kind: 'consensus', run_id: 'r' }])).toBe(false)
+  })
+
+  it('backs off failed jobs exponentially, capped', async () => {
+    const { jobRetryDelaySec } = await import('./db.js')
+    expect([1, 2, 3, 10].map(jobRetryDelaySec)).toEqual([30, 60, 120, 600])
+  })
+
+  it('claimScheduledRun is true only when the slot was inserted', async () => {
+    const { claimScheduledRun } = await import('./db.js')
+    mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 })
+    expect(await claimScheduledRun('bonds', '2026-10-06')).toBe(true)
+    mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 })
+    expect(await claimScheduledRun('bonds', '2026-10-06')).toBe(false)
+  })
 })

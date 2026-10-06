@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Minus, RefreshCw } from "lucide-react";
 import {
@@ -10,12 +10,15 @@ import {
   updateGoldPurchase,
   deactivateGoldPurchase,
 } from "@/app/actions";
-import { fmtIdr, fmtIdrCompact, fmtWib, fmtAgo, dirGlyph } from "@/lib/format";
+import { fmtIdr, fmtIdrCompact, fmtNum, fmtSigned, fmtWib, fmtAgo, dirGlyph, tone } from "@/lib/format";
 import type { GoldPurchase, GoldPrice } from "@/lib/types";
 import { foldWeightedAvg, type LedgerLot } from "@folionix/lib";
 import MetricCard from "@/components/MetricCard";
 import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
+import Delta from "@/components/Delta";
+import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import { useRefetchPoll } from "@/lib/useRefetchPoll";
 import Pager from "@/components/Pager";
 import { usePaged } from "@/lib/usePaged";
 
@@ -55,33 +58,11 @@ export default function GoldClient({
   const [editing, setEditing] = useState<Editing>(null);
   const [creating, setCreating] = useState(false);
   const [selling, setSelling] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-
-  // Guard the refetch poll against firing after the component unmounts.
-  const alive = useRef(true);
-  useEffect(() => () => { alive.current = false; }, []);
-
-  async function refetchPrices() {
-    setRefreshing(true);
-    setErr(null);
-    const baseline = fresh;
-    await insertPriceRefreshRequest("gold");
-    const deadline = Date.now() + 30000;
-    const tick = async () => {
-      if (!alive.current) return;
-      const newest = await pollLatestGoldPriceTime();
-      const done = (newest && (!baseline || newest > baseline)) || Date.now() > deadline;
-      if (!alive.current) return;
-      if (done) {
-        router.refresh();
-        setRefreshing(false);
-        return;
-      }
-      setTimeout(tick, 2000);
-    };
-    setTimeout(tick, 2000);
-  }
+  const { refreshing, status: refetchStatus, refetch: refetchPrices } = useRefetchPoll(
+    () => insertPriceRefreshRequest("gold"),
+    pollLatestGoldPriceTime,
+    fresh,
+  );
 
   // Per-row display math. BUY rows keep the usual cost/value/P&L; a SELL row
   // has no "value" of its own (the gold is gone) so we show sale proceeds in
@@ -96,7 +77,7 @@ export default function GoldClient({
     const pnlPct = pnl != null && rowAmount ? (pnl / rowAmount) * 100 : null;
     return { p, side, rowAmount, value, pnl, pnlPct };
   });
-  const grams4 = (g: number) => g.toLocaleString("id-ID", { maximumFractionDigits: 4 });
+  const grams4 = (g: number) => fmtNum(g, 4);
   const { page, setPage, totalPages, pageItems } = usePaged(rows);
 
   // Net totals must be folded chronologically per venue (a SELL realizes P&L
@@ -169,7 +150,6 @@ export default function GoldClient({
     }
     setEditing(null);
     setCreating(false);
-    setErr(null);
     router.refresh();
   }
 
@@ -177,10 +157,7 @@ export default function GoldClient({
     const g = Number(grams) || 0;
     const pricePerGram = Number(price) || 0;
     const net = netGramsByVenue.get(venue) ?? 0;
-    if (g > net + 1e-9) {
-      setErr(`Cannot sell more than ${grams4(net)} g held in ${venue}`);
-      throw new Error("oversell");
-    }
+    if (g > net + 1e-9) throw new Error(`Cannot sell more than ${grams4(net)} g held in ${venue}`);
     await insertGoldPurchase({
       venue,
       grams: g,
@@ -190,7 +167,6 @@ export default function GoldClient({
       side: "SELL",
     });
     setSelling(false);
-    setErr(null);
     router.refresh();
   }
 
@@ -205,43 +181,29 @@ export default function GoldClient({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-medium text-tprimary">Gold</h1>
-          {fresh && <p className="mt-0.5 text-[11px] text-tdim">synced {fmtAgo(fresh)} · cermati</p>}
+          {fresh && <p className="mt-0.5 text-caption text-tdim">synced {fmtAgo(fresh)} · cermati</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={refetchPrices}
-            disabled={refreshing}
-            className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm font-medium text-tmuted hover:text-tprimary disabled:opacity-60"
-          >
+          <button type="button" onClick={refetchPrices} disabled={refreshing} className={secondaryBtnCls}>
             <RefreshCw size={14} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Refetching…" : "Refetch prices"}
           </button>
           {heldVenues.length > 0 && (
-            <button
-              onClick={() => {
-                setSelling(true);
-                setErr(null);
-              }}
-              className="flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-sm font-semibold text-tmuted hover:text-tprimary"
-            >
+            <button type="button" onClick={() => setSelling(true)} className={secondaryBtnCls}>
               <Minus size={14} strokeWidth={2} />
               Sell
             </button>
           )}
-          <button
-            onClick={() => {
-              setCreating(true);
-              setErr(null);
-            }}
-            className="flex items-center gap-1.5 rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page"
-          >
+          <PrimaryButton type="button" onClick={() => setCreating(true)}>
             <Plus size={14} strokeWidth={2} />
             Add Purchase
-          </button>
+          </PrimaryButton>
         </div>
       </div>
 
-      {err && <p className="text-sm text-critical">{err}</p>}
+      {refetchStatus && (
+        <p role="status" className={`text-sm ${refetchStatus.critical ? "text-critical" : "text-tmuted"}`}>{refetchStatus.text}</p>
+      )}
 
       {purchases.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -250,17 +212,17 @@ export default function GoldClient({
           <MetricCard label="Market Value" value={hasValue ? fmtIdrCompact(marketValue) : "N/A"} fullValue={hasValue ? fmtIdr(marketValue) : "N/A"} />
           <MetricCard
             label="Unrealized P&L"
-            value={unrealizedPnl == null ? "N/A" : `${unrealizedPnl >= 0 ? "+" : ""}${fmtIdrCompact(unrealizedPnl)}`}
-            fullValue={unrealizedPnl == null ? "N/A" : `${unrealizedPnl >= 0 ? "+" : ""}${fmtIdr(unrealizedPnl)}`}
-            sub={unrealizedPnlPct != null ? `${unrealizedPnlPct >= 0 ? "+" : ""}${unrealizedPnlPct.toFixed(1)}%` : undefined}
-            color={unrealizedPnl == null ? undefined : unrealizedPnl >= 0 ? "up" : "down"}
+            value={unrealizedPnl == null ? "N/A" : fmtSigned(unrealizedPnl, fmtIdrCompact)}
+            fullValue={unrealizedPnl == null ? "N/A" : fmtSigned(unrealizedPnl, fmtIdr)}
+            sub={unrealizedPnlPct != null ? fmtSigned(unrealizedPnlPct) : undefined}
+            color={tone(unrealizedPnl)}
             glyph={unrealizedPnl == null ? undefined : dirGlyph(unrealizedPnl)}
           />
           <MetricCard
             label="Realized P&L"
-            value={`${realizedPnl >= 0 ? "+" : ""}${fmtIdrCompact(realizedPnl)}`}
-            fullValue={`${realizedPnl >= 0 ? "+" : ""}${fmtIdr(realizedPnl)}`}
-            color={realizedPnl >= 0 ? "up" : "down"}
+            value={fmtSigned(realizedPnl, fmtIdrCompact)}
+            fullValue={fmtSigned(realizedPnl, fmtIdr)}
+            color={tone(realizedPnl)}
             glyph={dirGlyph(realizedPnl)}
           />
         </div>
@@ -308,17 +270,13 @@ export default function GoldClient({
                   <span className="flex items-center gap-2">
                     <span className="font-medium capitalize text-tprimary">{p.venue}</span>
                     {side === "SELL" && (
-                      <span className="rounded-full border border-down/30 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-down">
+                      <span className="rounded-full border border-edge-hover px-1.5 py-px text-caption font-semibold uppercase tracking-wide text-tmuted">
                         Sell
                       </span>
                     )}
                   </span>
                   <div className="flex shrink-0 items-center gap-2">
-                    {pnlPct != null && (
-                      <span className={`text-xs font-medium ${pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                        {`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`}
-                      </span>
-                    )}
+                    {pnlPct != null && <Delta value={pnlPct} className="text-xs font-medium" />}
                     <button
                       onClick={() => setEditing({
                         id: p.id,
@@ -340,9 +298,7 @@ export default function GoldClient({
                   {side === "BUY" && (
                     <div className="col-span-2">
                       <span className="text-tdim">P&amp;L </span>
-                      <span className={pnl == null ? "num text-tdim" : `num ${pnl >= 0 ? "text-up" : "text-down"}`}>
-                        {pnl == null ? "—" : `${dirGlyph(pnl)} ${pnl >= 0 ? "+" : ""}${fmtIdr(pnl)}`}
-                      </span>
+                      <Delta value={pnl} fmt={fmtIdr} />
                     </div>
                   )}
                 </div>
@@ -371,7 +327,7 @@ export default function GoldClient({
                     <td className="py-2 pr-4 font-medium text-tprimary">
                       <span className="capitalize">{p.venue}</span>
                       {side === "SELL" && (
-                        <span className="ml-2 rounded-full border border-down/30 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-down">
+                        <span className="ml-2 rounded-full border border-edge-hover px-1.5 py-px text-caption font-semibold uppercase tracking-wide text-tmuted">
                           Sell
                         </span>
                       )}
@@ -381,14 +337,8 @@ export default function GoldClient({
                     <td className="num py-2 pr-4 text-right text-tmuted">{fmtIdr(rowAmount)}</td>
                     <td className="num py-2 pr-4 text-right">{value != null ? fmtIdr(value) : "—"}</td>
                     <td className="num whitespace-nowrap py-2 pr-4 text-right">
-                      <span className={pnl == null ? "text-tdim" : pnl >= 0 ? "text-up" : "text-down"}>
-                        {pnl == null ? "—" : `${dirGlyph(pnl)} ${pnl >= 0 ? "+" : ""}${fmtIdr(pnl)}`}
-                      </span>
-                      {pnlPct != null && (
-                        <span className={`ml-1 text-xs ${pnlPct >= 0 ? "text-up" : "text-down"}`}>
-                          ({`${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%`})
-                        </span>
-                      )}
+                      <Delta value={pnl} fmt={fmtIdr} />
+                      {pnlPct != null && <Delta value={pnlPct} paren glyph={false} className="ml-1 text-xs" />}
                     </td>
                     <td className="whitespace-nowrap py-2 pl-6 pr-4 text-tmuted">{fmtWib(p.purchased_at)}</td>
                     <td className="py-2 text-right">
@@ -497,7 +447,8 @@ function GoldForm({
   const [touched, setTouched] = useState<AmountField[]>(initial ? ["grams", "price"] : []);
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [purchased, setPurchased] = useState(initial?.purchased ?? nowLocalInput());
-  const [busy, setBusy] = useState<"save" | "remove" | null>(null);
+  const { busy, error, run } = useAsyncAction<"save" | "remove">();
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   function setAmount(field: AmountField, raw: string) {
     const next = deriveAmountFields(field, raw, fields, touched);
@@ -508,105 +459,60 @@ function GoldForm({
   const grams = parseNum(fields.grams);
   const price = parseNum(fields.price);
 
-  async function run(kind: "save" | "remove", fn: () => Promise<void>) {
-    setBusy(kind);
-    try {
-      await fn();
-    } catch {
-      setBusy(null); // failure: re-enable so the user can retry
-    }
-  }
+
+  const canSave = !!venue && grams != null && grams > 0 && price != null && price > 0;
 
   return (
-    <div>
+    <Form onSubmit={() => run("save", () => onSave({ venue, grams: fields.grams, price: fields.price, notes, purchased }))}>
       <div className="grid gap-3 md:grid-cols-2">
         {!isEdit && (
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Venue</span>
-            <select
-              value={venue}
-              onChange={(e) => setVenue(e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-            >
+          <Field label="Venue">
+            <select value={venue} onChange={(e) => setVenue(e.target.value)} className={inputCls}>
               {venues.length === 0 && <option value="">No venues available</option>}
-              {venues.map((v) => (
-                <option key={v} value={v}>
-                  {v}
-                </option>
-              ))}
+              {venues.map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
-          </label>
+          </Field>
         )}
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-tdim">Purchase Date &amp; Time</span>
-          <input
-            type="datetime-local"
-            value={purchased}
-            onChange={(e) => setPurchased(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-          />
-        </label>
+        <Field label={isSell ? "Sell Date & Time" : "Purchase Date & Time"}>
+          <input type="datetime-local" value={purchased} onChange={(e) => setPurchased(e.target.value)} className={inputCls} />
+        </Field>
         <div className="grid grid-cols-1 gap-3 md:col-span-2 md:grid-cols-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">Grams</span>
-            <input
-              type="number"
-              value={fields.grams}
-              onChange={(e) => setAmount("grams", e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">{isSell ? "Sell Price per Gram (IDR)" : "Price per Gram (IDR)"}</span>
-            <input
-              type="number"
-              value={fields.price}
-              onChange={(e) => setAmount("price", e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-tdim">{isSell ? "Proceeds (IDR)" : "Total Cost (IDR)"}</span>
-            <input
-              type="number"
-              value={fields.cost}
-              onChange={(e) => setAmount("cost", e.target.value)}
-              className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-            />
-          </label>
+          <Field label="Grams">
+            <input type="number" value={fields.grams} onChange={(e) => setAmount("grams", e.target.value)} className={inputCls} />
+          </Field>
+          <Field label={isSell ? "Sell Price per Gram (IDR)" : "Price per Gram (IDR)"}>
+            <input type="number" value={fields.price} onChange={(e) => setAmount("price", e.target.value)} className={inputCls} />
+          </Field>
+          <Field label={isSell ? "Proceeds (IDR)" : "Total Cost (IDR)"}>
+            <input type="number" value={fields.cost} onChange={(e) => setAmount("cost", e.target.value)} className={inputCls} />
+          </Field>
         </div>
-        <label className="flex flex-col gap-1 md:col-span-2">
-          <span className="text-xs text-tdim">Notes <span className="text-tdim opacity-60">optional</span></span>
-          <input
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="rounded-md border border-edge bg-page px-3 py-2 text-tprimary"
-          />
-        </label>
+        <Field label="Notes" optional className="md:col-span-2">
+          <input value={notes} onChange={(e) => setNotes(e.target.value)} className={inputCls} />
+        </Field>
       </div>
-      <div className="mt-3 flex gap-2">
-        <button
-          onClick={() =>
-            run("save", () => onSave({ venue, grams: fields.grams, price: fields.price, notes, purchased }))
-          }
-          disabled={!venue || grams == null || grams <= 0 || price == null || price <= 0 || busy !== null}
-          className="rounded-md bg-btn px-3 py-1.5 text-sm font-semibold text-page disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {busy === "save" ? "Saving…" : "Save"}
-        </button>
-        <button onClick={onCancel} disabled={busy !== null} className="rounded-md border border-edge px-3 py-1.5 text-sm text-tmuted disabled:opacity-60">
-          Cancel
-        </button>
-        {onDeactivate && (
-          <button
-            onClick={() => run("remove", onDeactivate)}
-            disabled={busy !== null}
-            className="ml-auto rounded-md px-3 py-1.5 text-sm text-down hover:underline disabled:opacity-60"
-          >
-            {busy === "remove" ? "Removing…" : "Remove"}
-          </button>
-        )}
-      </div>
-    </div>
+      {confirmRemove ? (
+        <div role="alert" className="mt-4 rounded-md border border-edge p-3 text-sm text-tsecondary">
+          Remove this purchase? It disappears from holdings and totals.
+          <div className="mt-2 flex gap-2">
+            <button type="button" disabled={busy !== null} onClick={() => onDeactivate && run("remove", onDeactivate)}
+              className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down disabled:opacity-60">
+              {busy === "remove" ? "Removing…" : "Remove"}
+            </button>
+            <button type="button" disabled={busy !== null} onClick={() => setConfirmRemove(false)} className={secondaryBtnCls}>Keep</button>
+          </div>
+          {error && <p className="mt-2 text-sm text-critical">{error}</p>}
+        </div>
+      ) : (
+        <FormActions busy={busy !== null} saving={busy === "save"} error={error} disabled={!canSave} onCancel={onCancel}>
+          {onDeactivate && (
+            <button type="button" onClick={() => setConfirmRemove(true)} disabled={busy !== null}
+              className="ml-auto rounded-sm px-3 py-2 text-sm text-tmuted hover:text-tprimary hover:underline disabled:opacity-60">
+              Remove
+            </button>
+          )}
+        </FormActions>
+      )}
+    </Form>
   );
 }

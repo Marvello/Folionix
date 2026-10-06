@@ -4,18 +4,23 @@
   /* ── Surfaces (brand: "Mission control at midnight") ── */
   --color-page: #0b1120;       /* Void Navy — app background */
   --color-component: #16202f;  /* Panel Slate — cards, panels */
-  --color-edge: #1e293b;       /* card borders */
+  --color-edge: #1e293b;       /* card borders (outline) */
+  --color-edge-hover: #334155; /* outline-variant — hover/strong hairline */
+  --color-surface-container: #1b2738;
+  --color-surface-container-high: #222e40;
 
   /* ── Text ── */
   --color-tprimary: #e2e8f0;   /* Paper White */
   --color-tsecondary: #cbd5e1;
   --color-tmuted: #94a3b8;     /* Neutral Grey */
-  --color-tdim: #64748b;
+  --color-tdim: #8291a7;       /* small captions: >=4.5:1 on page/component/edge (WCAG AA) */
   --color-heading: #cbd5e1;
 
   /* ── Brand + product ── */
   --color-accent: #2dd4bf;     /* Folio Teal — the product */
   --color-btn: #2dd4bf;        /* primary buttons = teal */
+  --color-btn-hover: #5eead4;  /* on-primary-container — primary hover */
+  --color-primary-container: #134e4a;
   --color-ai: #8b5cf6;         /* Signal Violet — model-generated insights */
   --color-ai-bright: #a78bfa;  /* Signal Bright — insight-badge text */
   --color-ai-surface: #23243f; /* insight-badge background */
@@ -25,6 +30,16 @@
   --color-down: #f59e0b;       /* Loss Amber — loss (calm, not panic) */
   --color-warn: #94a3b8;       /* secondary labels (neutral) */
   --color-critical: #ef4444;   /* Critical Red — system errors only */
+
+  /* ── Product allocation (non-semantic: never gain/loss/signal/teal/red) ── */
+  --color-product-stocks: #60a5fa;
+  --color-product-gold: #e5d3a1;
+  --color-product-bonds: #cbd5e1;
+  --color-product-funds: #f472b6;
+
+  /* ── Type scale below body (dense captions, freshness tags) ── */
+  --text-caption: 0.6875rem;   /* 11px */
+  --text-caption--line-height: 1rem;
 
   /* ── Typography ── */
   --font-display: var(--font-space-grotesk), Inter, sans-serif;
@@ -52,11 +67,11 @@ h1, h2, h3 {
 }
 
 /* Brand: the only thing that "lights up" is Folio Teal on focus.
-   One rule covers every form control so focus is always visible (a11y). */
-input,
-select,
-textarea {
-  outline: none;
+   One global ring for every keyboard-focusable element (a11y), plus a teal
+   border on focused form controls. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 input:focus,
 select:focus,

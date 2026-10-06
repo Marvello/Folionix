@@ -55,6 +55,7 @@ describe('computeAnalystScores', () => {
     expect(s.sentiment.score).toBe(80)   // 4 * 20
     expect(s.momentum.score).toBeGreaterThan(0)
     expect(s.composite).toBeGreaterThan(0)
+    expect(s.valuation.rationale).toContain('dividend yield 6.0%')
   })
 
   it('bearish setup scores negative', () => {
@@ -104,5 +105,12 @@ describe('computeAnalystScores', () => {
     )
     expect(s.sentiment.score).toBe(40)
     expect(s.composite).toBe(40)
+  })
+
+  it('missing news does not dilute the composite', () => {
+    const withoutNews = computeAnalystScores(snap({ pe: 8, pb: 0.9, div_yield_pct: 6 }), ind(), null)
+    expect(withoutNews.sentiment.rationale).toBe('insufficient data')
+    const parts = [withoutNews.technical, withoutNews.valuation, withoutNews.momentum]
+    expect(withoutNews.composite).toBe(Math.round(parts.reduce((a, p) => a + p.score, 0) / 3))
   })
 })

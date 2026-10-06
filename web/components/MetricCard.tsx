@@ -40,7 +40,7 @@ export default function MetricCard({
             showTooltip ? "scale-100 opacity-100" : "scale-95 opacity-0"
           }`}
         >
-          <div className="num whitespace-nowrap rounded-md border border-edge bg-page px-2.5 py-1 text-xs font-semibold text-tprimary shadow-xl">
+          <div className="num whitespace-nowrap rounded-md border border-edge bg-page px-2.5 py-1 text-xs font-semibold text-tprimary ">
             {fullValue}
           </div>
         </div>
@@ -52,7 +52,7 @@ export default function MetricCard({
         {glyph && <span className="shrink-0 text-xs leading-none sm:text-sm">{glyph}</span>}
         <span className="min-w-0 whitespace-nowrap sm:whitespace-normal sm:break-all">{value}</span>
       </div>
-      {sub && <div className={`num mt-1.5 text-[11px] leading-normal break-words sm:text-xs ${subColor}`}>{sub}</div>}
+      {sub && <div className={`num mt-1.5 text-caption leading-normal break-words sm:text-xs ${subColor}`}>{sub}</div>}
     </div>
   );
 }

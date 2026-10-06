@@ -1,9 +1,9 @@
 // app/src/graph/runner.ts
 import 'dotenv/config'
-import { buildOrchestratorGraph } from './orchestrator'
+import { runCycle } from './orchestrator'
 import { detectSession, isMarketActive } from './session'
 import { runPortfolioPipeline } from '../services/portfolio'
-import { claimPendingRefresh } from '../db/db'
+import { claimPendingRefresh, claimScheduledRun, hasPendingRefresh, pruneHistory } from '../db/db'
 import { syncBondCouponSchedules, sendCouponReminders } from '../services/bonds'
 import { syncDividendSchedules, sendDividendReminders } from '../services/dividends'
 import { refreshForexRates } from '../services/forex'
@@ -14,8 +14,17 @@ import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
 import { runPendingMigrations } from '../db/migrate'
 
-const ACTIVE_INTERVAL_MS  = Number(process.env.GRAPH_ACTIVE_INTERVAL ?? 5) * 60_000
-const IDLE_INTERVAL_MS    = Number(process.env.GRAPH_IDLE_INTERVAL ?? 30) * 60_000
+/** Positive minutes from env, else the default — "" or "5m" must not become a ~1ms busy loop. */
+function envMinutes(name: string, def: number): number {
+  const v = Number(process.env[name])
+  if (process.env[name] != null && !(Number.isFinite(v) && v > 0)) {
+    console.warn(`[runner] ${name}="${process.env[name]}" is not a positive number, using ${def}`)
+  }
+  return (Number.isFinite(v) && v > 0 ? v : def) * 60_000
+}
+
+const ACTIVE_INTERVAL_MS  = envMinutes('GRAPH_ACTIVE_INTERVAL', 5)
+const IDLE_INTERVAL_MS    = envMinutes('GRAPH_IDLE_INTERVAL', 30)
 const BOND_CHECK_HOUR_WIB = 8  // run bond schedule sync at 08:00 WIB daily
 const DIVIDEND_CHECK_HOUR_WIB = 8 // dividend sync + reminders at 08:00 WIB daily
 const FOREX_CHECK_HOUR_WIB = 9 // run forex refresh at 09:00 WIB daily (market open)
@@ -37,12 +46,26 @@ if (!Number.isFinite(rawFundamentalsHour)) {
 const GOLD_INTERVAL_MS = Number(process.env.GOLD_REFRESH_HOURS ?? 3) * 3_600_000
 const WEEK_REVIEW_HOUR_WIB = 9  // weekly review Saturday >= 09:00 WIB (after market week closes)
 const WEEK_REVIEW_DAY_WIB = 6   // Saturday in WIB
+// History retention is a data-deletion policy, so it is opt-in: unset = keep everything.
+const RETENTION_DAYS = Number(process.env.RETENTION_DAYS) > 0 ? Number(process.env.RETENTION_DAYS) : 0
+const RETENTION_HOUR_WIB = 2
+const REFRESH_POLL_MS = 30_000  // how often an idle runner checks for dashboard refresh requests
 
 let running = true
+let wake = () => {}
+
+// Sleep that SIGTERM cuts short, so shutdown doesn't wait out a 30-minute idle interval.
+function sleep(ms: number): Promise<void> {
+  return new Promise(r => {
+    const t = setTimeout(r, ms)
+    wake = () => { clearTimeout(t); r() }
+  })
+}
 
 process.on('SIGTERM', () => {
   console.log('[runner] SIGTERM received — shutting down after current cycle')
   running = false
+  wake()
 })
 
 async function runBondDailyChecks(): Promise<void> {
@@ -107,8 +130,7 @@ async function runGoldRefresh(reason: string): Promise<void> {
 
 async function main(): Promise<void> {
   await runPendingMigrations()
-  console.log('[runner] starting LangGraph orchestrator')
-  const graph = buildOrchestratorGraph()
+  console.log(`[runner] starting orchestrator (build ${process.env.GIT_COMMIT?.slice(0, 8) ?? 'dev'})`)
 
   let state: OrchestratorState = {
     current_session: 'CLOSED',
@@ -119,22 +141,23 @@ async function main(): Promise<void> {
     signal_cooldowns: {},
     pending_batch: [],
     last_run: null,
-    last_news_fetch: null,
   }
 
-  // Initial price refresh on startup
-  try {
-    await claimPendingRefresh()
-  } catch { /* ignore */ }
-
-  let lastPortfolioBaselineDate = ''
-  let lastBondCheckDate = ''
-  let lastDividendCheckDate = ''
-  let lastForexCheckDate = ''
-  let lastAssetCheckDate = ''
-  let lastFundamentalsDate = ''
+  // Daily latches: an in-memory fast path, backed by a durable claim in
+  // scheduled_runs so a restart (deploy, OOM) never re-runs a job for the day.
+  const latched = new Map<string, string>()
+  async function due(job: string, todayWib: string): Promise<boolean> {
+    if (latched.get(job) === todayWib) return false
+    latched.set(job, todayWib)
+    try {
+      return await claimScheduledRun(job, todayWib)
+    } catch (err) {
+      latched.delete(job)   // DB unavailable: retry the claim next cycle
+      console.error(`[runner] claim ${job} failed:`, err)
+      return false
+    }
+  }
   let lastGoldRefreshMs = 0
-  let lastWeekReviewDate = ''
 
   while (running) {
     const now = new Date()
@@ -150,8 +173,7 @@ async function main(): Promise<void> {
     // market day (~09:00 WIB, live prices). Keeps every held position analyzed
     // at least once per trading day; silent: Telegram alerts
     // are reserved for spike signals.
-    if (isMarketActive(detectSession(now)) && lastPortfolioBaselineDate !== todayWib) {
-      lastPortfolioBaselineDate = todayWib
+    if (isMarketActive(detectSession(now)) && await due('portfolio-baseline', todayWib)) {
       try {
         console.log('[runner] running daily portfolio baseline analysis (silent)...')
         await runPortfolioPipeline(undefined, 'FULL', 'silent')
@@ -161,27 +183,23 @@ async function main(): Promise<void> {
     }
 
     // Daily bond schedule sync
-    if (wibHour >= BOND_CHECK_HOUR_WIB && lastBondCheckDate !== todayWib) {
-      lastBondCheckDate = todayWib
+    if (wibHour >= BOND_CHECK_HOUR_WIB && await due('bonds', todayWib)) {
       await runBondDailyChecks()
     }
 
     // Daily dividend schedule sync + reminders
-    if (wibHour >= DIVIDEND_CHECK_HOUR_WIB && lastDividendCheckDate !== todayWib) {
-      lastDividendCheckDate = todayWib
+    if (wibHour >= DIVIDEND_CHECK_HOUR_WIB && await due('dividends', todayWib)) {
       await runDividendDailyChecks()
     }
 
     // Daily forex rate refresh
-    if (wibHour >= FOREX_CHECK_HOUR_WIB && lastForexCheckDate !== todayWib) {
-      lastForexCheckDate = todayWib
+    if (wibHour >= FOREX_CHECK_HOUR_WIB && await due('forex', todayWib)) {
       await runForexDailyRefresh()
     }
 
     // Weekly review — Saturday >= 09:00 WIB, once per date
     const wibDay = new Date(now.getTime() + 7 * 3_600_000).getUTCDay()
-    if (wibDay === WEEK_REVIEW_DAY_WIB && wibHour >= WEEK_REVIEW_HOUR_WIB && lastWeekReviewDate !== todayWib) {
-      lastWeekReviewDate = todayWib
+    if (wibDay === WEEK_REVIEW_DAY_WIB && wibHour >= WEEK_REVIEW_HOUR_WIB && await due('week-review', todayWib)) {
       try {
         console.log('[runner] generating weekly review...')
         await runWeekReview()
@@ -198,14 +216,12 @@ async function main(): Promise<void> {
     }
 
     // Daily fund NAV refresh (>= so a cycle landing after 17:00 still runs it)
-    if (wibHour >= ASSET_CHECK_HOUR_WIB && lastAssetCheckDate !== todayWib) {
-      lastAssetCheckDate = todayWib
+    if (wibHour >= ASSET_CHECK_HOUR_WIB && await due('fund-navs', todayWib)) {
       await runAssetDailyRefresh()
     }
 
     // Daily fundamentals sweep (>= so a cycle landing after 18:00 still runs it)
-    if (wibHour >= FUNDAMENTALS_HOUR_WIB && lastFundamentalsDate !== todayWib) {
-      lastFundamentalsDate = todayWib
+    if (wibHour >= FUNDAMENTALS_HOUR_WIB && await due('fundamentals', todayWib)) {
       try {
         console.log('[runner] refreshing fundamentals...')
         const rs = await refreshFundamentals()
@@ -213,6 +229,15 @@ async function main(): Promise<void> {
         console.log(`[runner] fundamentals refreshed ${ok}/${rs.length}`)
       } catch (err) {
         console.error('[runner] fundamentals refresh error:', err)
+      }
+    }
+
+    // Nightly history thinning (opt-in)
+    if (RETENTION_DAYS && wibHour >= RETENTION_HOUR_WIB && await due('retention', todayWib)) {
+      try {
+        console.log(`[runner] pruned history older than ${RETENTION_DAYS}d:`, await pruneHistory(RETENTION_DAYS))
+      } catch (err) {
+        console.error('[runner] retention error:', err)
       }
     }
 
@@ -240,7 +265,7 @@ async function main(): Promise<void> {
         }
       }
 
-      state = await graph.invoke(state) as OrchestratorState
+      state = await runCycle(state)
       console.log(`[runner] cycle done — session: ${state.current_session}, signals: ${state.signals?.length ?? 0}`)
     } catch (err) {
       console.error('[runner] cycle error:', err)
@@ -248,10 +273,19 @@ async function main(): Promise<void> {
 
     const isActive = ['SESSION_1', 'SESSION_2'].includes(state.current_session)
     const interval = isActive ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS
-    await new Promise(r => setTimeout(r, interval))
+    // Sleep in short slices so a refresh pressed on the dashboard is picked up
+    // within ~30s instead of after a full (up to 30 min) idle interval.
+    const wakeAt = Date.now() + interval
+    while (running && Date.now() < wakeAt) {
+      await sleep(Math.min(REFRESH_POLL_MS, wakeAt - Date.now()))
+      if (running && await hasPendingRefresh().catch(() => false)) break
+    }
   }
 
   console.log('[runner] stopped')
 }
 
-main().catch(console.error)
+main().catch((err) => {
+  console.error('[runner] fatal:', err)
+  process.exit(1)
+})

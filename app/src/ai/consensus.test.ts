@@ -56,6 +56,12 @@ describe('mapToRecommendation', () => {
     expect(mapToRecommendation(-60, true, 10)).toBe('TAKE PROFIT')
     expect(mapToRecommendation(-60, true, -10)).toBe('CUT LOSS')
   })
+
+  it('never says TAKE PROFIT without a profit, nor averages down on a modest consensus', () => {
+    expect(mapToRecommendation(-50, true, null)).toBe('TRIM')
+    expect(mapToRecommendation(-50, true, 0)).toBe('TRIM')
+    expect(mapToRecommendation(45, true, -8)).toBe('HOLD')
+  })
 })
 
 describe('buildConsensusPrompt', () => {

@@ -8,12 +8,12 @@ const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
 const KIND_DOT: Record<CalendarEventKind, string> = {
   income: "bg-up",
   buy: "bg-accent",
-  sell: "bg-down",
+  sell: "bg-tmuted",
 };
 const KIND_LABEL: Record<CalendarEventKind, string> = {
   income: "text-up",
   buy: "text-accent",
-  sell: "text-down",
+  sell: "text-tsecondary",
 };
 const MAX_TOOLTIP_ROWS = 8;
 
@@ -23,6 +23,7 @@ const isoLocal = (d: Date) =>
 export default function ActivityCalendar({ events }: { events: CalendarEvent[] }) {
   const now = new Date();
   const [view, setView] = useState({ y: now.getFullYear(), m: now.getMonth() });
+  const [openIso, setOpenIso] = useState<string | null>(null);
   const todayIso = isoLocal(now);
 
   const byDate = new Map<string, CalendarEvent[]>();
@@ -50,18 +51,18 @@ export default function ActivityCalendar({ events }: { events: CalendarEvent[] }
       <div className="mb-2 flex items-center justify-between">
         <h2 className="font-semibold text-tprimary">Activity Calendar</h2>
         <div className="flex items-center gap-1">
-          <span className="mr-1 text-xs text-tdim">{monthLabel}</span>
-          <button onClick={() => shift(-1)} aria-label="Previous month" className="rounded-md border border-edge p-1 text-tmuted hover:text-tprimary">
+          <span className="mr-1 text-xs text-tdim" aria-live="polite">{monthLabel}</span>
+          <button type="button" onClick={() => shift(-1)} aria-label="Previous month" className="rounded-md border border-edge p-1 text-tmuted hover:text-tprimary">
             <ChevronLeft size={14} />
           </button>
-          <button onClick={() => shift(1)} aria-label="Next month" className="rounded-md border border-edge p-1 text-tmuted hover:text-tprimary">
+          <button type="button" onClick={() => shift(1)} aria-label="Next month" className="rounded-md border border-edge p-1 text-tmuted hover:text-tprimary">
             <ChevronRight size={14} />
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-y-1 text-center text-[11px] text-tdim">
-        {WEEKDAYS.map((w, i) => <div key={i} className="pb-1 font-medium">{w}</div>)}
+      <div className="grid grid-cols-7 gap-y-1 text-center text-caption text-tdim">
+        {WEEKDAYS.map((w, i) => <div key={i} aria-hidden className="pb-1 font-medium">{w}</div>)}
         {cells.map((d, i) => {
           const iso = isoLocal(d);
           const inMonth = d.getMonth() === view.m;
@@ -71,56 +72,76 @@ export default function ActivityCalendar({ events }: { events: CalendarEvent[] }
           const kinds = [...new Set(evList.map((e) => e.kind))];
           const overflow = evList.length - MAX_TOOLTIP_ROWS;
 
+          const dayLabel = d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+          const cellCls = `relative flex h-7 w-7 items-center justify-center rounded-full text-sm ${
+            isToday
+              ? "font-semibold text-tprimary ring-2 ring-accent"
+              : evList.length
+                ? "font-medium text-tprimary ring-1 ring-edge-hover"
+                : inMonth
+                  ? "text-tsecondary"
+                  : "text-tdim"
+          }`;
+          const dots = evList.length > 0 && (
+            <span aria-hidden className="absolute -bottom-0.5 flex gap-0.5">
+              {kinds.slice(0, 3).map((k) => (
+                <span key={k} className={`h-1 w-1 rounded-full ${KIND_DOT[k]}`} />
+              ))}
+            </span>
+          );
+
+          if (evList.length === 0) {
+            return (
+              <div key={i} className="relative flex justify-center py-0.5">
+                <div className={cellCls} aria-current={isToday ? "date" : undefined}>{d.getDate()}</div>
+              </div>
+            );
+          }
+
+          // Event day: a real button (keyboard + touch). Details show on hover,
+          // on keyboard focus (focus-within) and on tap (open state).
+          const open = openIso === iso;
           return (
-            <div key={i} className="relative flex justify-center py-0.5">
-              <div
-                className={`group relative flex h-7 w-7 items-center justify-center rounded-full text-sm ${
-                  isToday
-                    ? "bg-btn font-semibold text-page"
-                    : evList.length
-                      ? "font-medium text-tprimary ring-1 ring-accent"
-                      : inMonth
-                        ? "text-tsecondary"
-                        : "text-tdim"
-                }`}
+            <div key={i} className="group relative flex justify-center py-0.5">
+              <button
+                type="button"
+                className={cellCls}
+                aria-current={isToday ? "date" : undefined}
+                aria-expanded={open}
+                aria-label={`${dayLabel}: ${evList.length} event${evList.length > 1 ? "s" : ""}`}
+                onClick={() => setOpenIso(open ? null : iso)}
+                onBlur={() => setOpenIso((o) => (o === iso ? null : o))}
               >
                 {d.getDate()}
-                {evList.length > 0 && !isToday && (
-                  <span className="absolute -bottom-0.5 flex gap-0.5">
-                    {kinds.slice(0, 3).map((k) => (
-                      <span key={k} className={`h-1 w-1 rounded-full ${KIND_DOT[k]}`} />
-                    ))}
-                  </span>
-                )}
-                {evList.length > 0 && (
-                  <div className={`pointer-events-none absolute bottom-full z-20 mb-1.5 hidden w-max max-w-[240px] rounded-md border border-edge bg-component p-2 text-left shadow-lg group-hover:block ${i % 7 < 2 ? "left-0" : i % 7 > 4 ? "right-0" : "left-1/2 -translate-x-1/2"}`}>
-                    <p className="mb-1 text-[11px] font-semibold text-tprimary">
-                      {d.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}
+                {dots}
+              </button>
+              <div
+                role="tooltip"
+                className={`pointer-events-none absolute bottom-full z-20 mb-1.5 w-max max-w-[240px] rounded-md border border-edge bg-surface-container-high p-2 text-left group-focus-within:block group-hover:block ${open ? "block" : "hidden"} ${i % 7 < 2 ? "left-0" : i % 7 > 4 ? "right-0" : "left-1/2 -translate-x-1/2"}`}
+              >
+                <p className="mb-1 text-caption font-semibold text-tprimary">{dayLabel}</p>
+                {evList.slice(0, MAX_TOOLTIP_ROWS).map((e, j) => (
+                  <div key={j} className="mb-1 whitespace-nowrap text-caption last:mb-0">
+                    <p className="text-tprimary">{e.label}</p>
+                    <p className="text-tmuted">
+                      {fmtEventAmount(e)
+                        ? <span className={`num ${KIND_LABEL[e.kind]}`}>{fmtEventAmount(e)}</span>
+                        : <span className="text-tdim">—</span>}
+                      {e.kind === "income" && (
+                        <>
+                          {" · "}
+                          {e.recorded
+                            ? <span className="text-up">✓ Recorded</span>
+                            : isFuture
+                              ? <span className="text-tdim">Upcoming</span>
+                              : <span className="text-warn">Not recorded</span>}
+                        </>
+                      )}
                     </p>
-                    {evList.slice(0, MAX_TOOLTIP_ROWS).map((e, j) => (
-                      <div key={j} className="mb-1 whitespace-nowrap text-[11px] last:mb-0">
-                        <p className="text-tprimary">{e.label}</p>
-                        <p className="text-tmuted">
-                          {fmtEventAmount(e)
-                            ? <span className={`num ${KIND_LABEL[e.kind]}`}>{fmtEventAmount(e)}</span>
-                            : <span className="text-tdim">—</span>}
-                          {e.kind === "income" && (
-                            <>
-                              {" · "}
-                              {e.recorded
-                                ? <span className="text-up">✓ Recorded</span>
-                                : isFuture
-                                  ? <span className="text-tdim">Upcoming</span>
-                                  : <span className="text-warn">Not recorded</span>}
-                            </>
-                          )}
-                        </p>
-                      </div>
-                    ))}
-                    {overflow > 0 && (
-                      <p className="mt-1 border-t border-edge pt-1 text-[11px] text-tdim">+{overflow} more</p>
-                    )}
                   </div>
+                ))}
+                {overflow > 0 && (
+                  <p className="mt-1 border-t border-edge pt-1 text-caption text-tdim">+{overflow} more</p>
                 )}
               </div>
             </div>

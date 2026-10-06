@@ -17,7 +17,6 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
 });
 
-import { headers } from "next/headers";
 import { publicEnv } from "@/lib/env";
 import Nav from "@/components/Nav";
 
@@ -35,9 +34,6 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // Per-request nonce from the proxy; ready for a future CSP, unused until then.
-  const nonce = (await headers()).get("x-nonce") ?? undefined;
-
   // Allowlist: only these public vars (from lib/env's PUBLIC_ENV_KEYS) reach the
   // browser. Escape "<" so a value can never break out of the <script> tag.
   const envJson = JSON.stringify(publicEnv()).replace(/</g, "\\u003c");
@@ -49,7 +45,6 @@ export default async function RootLayout({
     >
       <head>
         <script
-          nonce={nonce}
           dangerouslySetInnerHTML={{ __html: `window.__ENV=${envJson}` }}
         />
       </head>

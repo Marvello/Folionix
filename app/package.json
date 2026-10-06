@@ -20,9 +20,6 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "^4",
-    "@folionix/lib": "*",
-    "@langchain/core": "^1",
-    "@langchain/langgraph": "^1",
     "ai": "^7",
     "dotenv": "^17",
     "got-scraping": "^4.2.1",
