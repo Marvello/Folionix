@@ -1,5 +1,6 @@
 "use client";
 
+import { SecondaryButton } from "@/components/Form";
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 
@@ -18,12 +19,9 @@ export default function CopyButton({ text, label = "Copy markdown" }: { text: st
   }
 
   return (
-    <button
-      onClick={copy}
-      className="inline-flex items-center gap-1.5 rounded-md border border-edge px-3 py-1.5 text-xs font-medium text-tmuted hover:border-accent hover:text-tprimary"
-    >
+    <SecondaryButton size="sm" onClick={copy} className="font-medium hover:border-accent">
       {copied ? <Check size={13} strokeWidth={1.5} className="text-up" /> : <Copy size={13} strokeWidth={1.5} />}
       {copied ? "Copied" : label}
-    </button>
+    </SecondaryButton>
   );
 }

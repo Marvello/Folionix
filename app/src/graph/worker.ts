@@ -8,6 +8,7 @@ import {
 } from '../db/db'
 import type { AnalysisJobRow } from '../../../lib/types'
 import { runPendingMigrations } from '../db/migrate'
+import { beat } from '../utils/heartbeat'
 
 // An empty or non-numeric value must not become a 0ms busy loop against the DB.
 const POLL_MS      = (Number(process.env.WORKER_POLL_SEC) > 0 ? Number(process.env.WORKER_POLL_SEC) : 10) * 1000
@@ -47,6 +48,7 @@ process.on('SIGTERM', () => {
 })
 
 async function main(): Promise<void> {
+  beat()
   await runPendingMigrations()
   console.log('[worker] starting analysis-job worker')
 
@@ -80,6 +82,7 @@ async function main(): Promise<void> {
   }
 
   while (running) {
+    beat()
     let claimed = false
     try {
       const job = await claimAnalysisJob(MAX_ATTEMPTS)

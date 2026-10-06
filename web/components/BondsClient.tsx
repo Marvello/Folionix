@@ -11,7 +11,8 @@ import MetricCard from "@/components/MetricCard";
 import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
 import SortTh from "@/components/SortTh";
-import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import Pager from "@/components/Pager";
+import { Field, Form, FormActions, PrimaryButton, inputCls, SecondaryButton, useAsyncAction } from "@/components/Form";
 import { useSort, compareBy } from "@/lib/useSort";
 
 const SERIES_TYPES = ["SR", "ORI", "SBR", "ST", "CORP"] as const;
@@ -692,25 +693,12 @@ export default function BondsClient({
                   </table>
                   {allDates.length === 0 && <p className="py-4 text-center text-sm text-tdim">No schedule entries.</p>}
                 </div>
-                {totalPages > 1 && (
-                  <div className="mt-3 flex items-center justify-between text-xs text-tdim">
-                    <button
-                      onClick={() => setSchedulePage((p) => Math.max(1, p - 1))}
-                      disabled={page <= 1}
-                      className="rounded-md border border-edge px-2.5 py-1 text-tmuted disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Prev
-                    </button>
-                    <span>Page {page} of {totalPages}</span>
-                    <button
-                      onClick={() => setSchedulePage((p) => Math.min(totalPages, p + 1))}
-                      disabled={page >= totalPages}
-                      className="rounded-md border border-edge px-2.5 py-1 text-tmuted disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      Next
-                    </button>
-                  </div>
-                )}
+                <Pager
+                  page={page}
+                  totalPages={totalPages}
+                  onPrev={() => setSchedulePage((p) => Math.max(1, p - 1))}
+                  onNext={() => setSchedulePage((p) => Math.min(totalPages, p + 1))}
+                />
               </>
             )}
           </Modal>
@@ -831,7 +819,7 @@ function BondForm({
               className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down disabled:opacity-60">
               {busy === "remove" ? "Removing…" : "Remove"}
             </button>
-            <button type="button" disabled={busy !== null} onClick={() => setConfirmRemove(false)} className={secondaryBtnCls}>Keep</button>
+            <SecondaryButton disabled={busy !== null} onClick={() => setConfirmRemove(false)}>Keep</SecondaryButton>
           </div>
           {error && <p className="mt-2 text-sm text-critical">{error}</p>}
         </div>
@@ -933,16 +921,15 @@ function ScheduleLogForm({
           </p>
           <div className="space-y-2">
             {holdings.map((h) => (
-              <label key={h.id} className="flex items-center justify-between gap-3">
-                <span className="text-xs text-tmuted">{h.platform || seriesCode} · {fmtIdr(h.principal)}</span>
+              <Field key={h.id} inline label={`${h.platform || seriesCode} · ${fmtIdr(h.principal)}`}>
                 <input
                   type="number"
                   aria-label={`Amount for ${h.platform || seriesCode}`}
                   value={amounts[h.id] ?? ""}
                   onChange={(e) => setAmounts((a) => ({ ...a, [h.id]: e.target.value }))}
-                  className="num w-40 rounded-md border border-edge bg-page px-3 py-2 text-right text-tprimary"
+                  className={`num w-40 text-right ${inputCls}`}
                 />
-              </label>
+              </Field>
             ))}
           </div>
           <Field label="Notes" optional className="mt-3">

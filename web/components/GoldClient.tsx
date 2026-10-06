@@ -17,7 +17,7 @@ import MetricCard from "@/components/MetricCard";
 import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
 import Delta from "@/components/Delta";
-import { Field, Form, FormActions, PrimaryButton, inputCls, secondaryBtnCls, useAsyncAction } from "@/components/Form";
+import { Field, Form, FormActions, PrimaryButton, inputCls, SecondaryButton, useAsyncAction } from "@/components/Form";
 import { useRefetchPoll } from "@/lib/useRefetchPoll";
 import Pager from "@/components/Pager";
 import { usePaged } from "@/lib/usePaged";
@@ -184,15 +184,15 @@ export default function GoldClient({
           {fresh && <p className="mt-0.5 text-caption text-tdim">synced {fmtAgo(fresh)} · cermati</p>}
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={refetchPrices} disabled={refreshing} className={secondaryBtnCls}>
+          <SecondaryButton onClick={refetchPrices} disabled={refreshing}>
             <RefreshCw size={14} strokeWidth={1.5} className={refreshing ? "animate-spin" : ""} />
             {refreshing ? "Refetching…" : "Refetch prices"}
-          </button>
+          </SecondaryButton>
           {heldVenues.length > 0 && (
-            <button type="button" onClick={() => setSelling(true)} className={secondaryBtnCls}>
+            <SecondaryButton onClick={() => setSelling(true)}>
               <Minus size={14} strokeWidth={2} />
               Sell
-            </button>
+            </SecondaryButton>
           )}
           <PrimaryButton type="button" onClick={() => setCreating(true)}>
             <Plus size={14} strokeWidth={2} />
@@ -499,7 +499,7 @@ function GoldForm({
               className="inline-flex h-10 items-center rounded-sm border border-down/40 px-4 text-sm font-semibold text-down disabled:opacity-60">
               {busy === "remove" ? "Removing…" : "Remove"}
             </button>
-            <button type="button" disabled={busy !== null} onClick={() => setConfirmRemove(false)} className={secondaryBtnCls}>Keep</button>
+            <SecondaryButton disabled={busy !== null} onClick={() => setConfirmRemove(false)}>Keep</SecondaryButton>
           </div>
           {error && <p className="mt-2 text-sm text-critical">{error}</p>}
         </div>

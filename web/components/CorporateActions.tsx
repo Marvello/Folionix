@@ -24,6 +24,24 @@ function describe(a: CorporateActionRow): string {
   return a.source;
 }
 
+function List({ items, heading }: { items: CorporateActionRow[]; heading: string }) {
+  if (items.length === 0) return null;
+  return (
+    <div>
+      <div className="mb-1.5 text-xs text-tdim">{heading}</div>
+      <ul className="divide-y divide-edge/50">
+        {items.map((a) => (
+          <li key={`${a.type}-${a.event_date}`} className="flex items-baseline gap-3 py-2">
+            <span className="num w-24 shrink-0 text-xs text-tdim">{fmtWibDate(a.event_date)}</span>
+            <span className="w-36 shrink-0 text-sm text-tprimary">{TYPE_LABEL[a.type]}</span>
+            <span className="text-sm text-tsecondary">{describe(a)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function CorporateActions({ rows }: { rows: CorporateActionRow[] }) {
   if (rows.length === 0) {
     return <EmptyState message="No corporate actions recorded for this ticker." />;
@@ -31,22 +49,6 @@ export default function CorporateActions({ rows }: { rows: CorporateActionRow[] 
   const today = wibDateKey();
   const upcoming = rows.filter((r) => r.event_date >= today);
   const past = rows.filter((r) => r.event_date < today);
-
-  const List = ({ items, heading }: { items: CorporateActionRow[]; heading: string }) =>
-    items.length === 0 ? null : (
-      <div>
-        <div className="mb-1.5 text-xs text-tdim">{heading}</div>
-        <ul className="divide-y divide-edge/50">
-          {items.map((a) => (
-            <li key={`${a.type}-${a.event_date}`} className="flex items-baseline gap-3 py-2">
-              <span className="num w-24 shrink-0 text-xs text-tdim">{fmtWibDate(a.event_date)}</span>
-              <span className="w-36 shrink-0 text-sm text-tprimary">{TYPE_LABEL[a.type]}</span>
-              <span className="text-sm text-tsecondary">{describe(a)}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
 
   return (
     <section>

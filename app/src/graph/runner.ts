@@ -13,6 +13,7 @@ import { refreshFundamentals } from '../services/fundamentals'
 import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
 import { runPendingMigrations } from '../db/migrate'
+import { beat } from '../utils/heartbeat'
 
 /** Positive minutes from env, else the default — "" or "5m" must not become a ~1ms busy loop. */
 function envMinutes(name: string, def: number): number {
@@ -129,6 +130,7 @@ async function runGoldRefresh(reason: string): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  beat()
   await runPendingMigrations()
   console.log(`[runner] starting orchestrator (build ${process.env.GIT_COMMIT?.slice(0, 8) ?? 'dev'})`)
 
@@ -160,6 +162,7 @@ async function main(): Promise<void> {
   let lastGoldRefreshMs = 0
 
   while (running) {
+    beat()
     const now = new Date()
     // Shift into WIB once, then read both hour and calendar date off it. Deriving
     // todayWib from now.toISOString() gave the UTC date, which is a day behind
@@ -277,6 +280,7 @@ async function main(): Promise<void> {
     // within ~30s instead of after a full (up to 30 min) idle interval.
     const wakeAt = Date.now() + interval
     while (running && Date.now() < wakeAt) {
+      beat()
       await sleep(Math.min(REFRESH_POLL_MS, wakeAt - Date.now()))
       if (running && await hasPendingRefresh().catch(() => false)) break
     }

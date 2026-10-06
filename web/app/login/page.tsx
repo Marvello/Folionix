@@ -3,6 +3,7 @@
 import Image from "next/image";
 import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
+import { Field, PrimaryButton } from "@/components/Form";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -53,8 +54,7 @@ export default function LoginPage() {
             Sign-in failed. Check your email and password.
           </p>
         )}
-        <label className="mb-3 block">
-          <span className="mb-1 block text-sm text-tmuted">Email</span>
+        <Field label="Email" className="mb-3">
           <input
             type="email"
             value={email}
@@ -63,9 +63,8 @@ export default function LoginPage() {
             autoComplete="email"
             className="w-full rounded-md border border-edge bg-page px-3 py-2 text-sm focus:border-btn"
           />
-        </label>
-        <label className="mb-5 block">
-          <span className="mb-1 block text-sm text-tmuted">Password</span>
+        </Field>
+        <Field label="Password" className="mb-5">
           <input
             type="password"
             value={password}
@@ -74,14 +73,10 @@ export default function LoginPage() {
             autoComplete="current-password"
             className="w-full rounded-md border border-edge bg-page px-3 py-2 text-sm focus:border-btn"
           />
-        </label>
-        <button
-          type="submit"
-          disabled={loading}
-          className="h-10 w-full rounded-sm bg-btn px-5 text-xs font-semibold tracking-[0.04em] text-page hover:bg-btn-hover disabled:opacity-60"
-        >
+        </Field>
+        <PrimaryButton disabled={loading} className="w-full">
           {loading ? "Signing in…" : "Sign in"}
-        </button>
+        </PrimaryButton>
       </form>
     </div>
   );

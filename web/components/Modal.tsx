@@ -1,5 +1,6 @@
 "use client";
 
+import { IconButton, SecondaryButton } from "@/components/Form";
 import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 
@@ -57,13 +58,9 @@ export default function Modal({
           <h3 id={titleId} className="font-semibold text-tprimary">
             {title}
           </h3>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-md p-2 text-tdim hover:text-tprimary"
-          >
+          <IconButton onClick={onClose} aria-label="Close">
             <X size={18} strokeWidth={1.5} />
-          </button>
+          </IconButton>
         </div>
         {children}
       </div>
@@ -114,14 +111,9 @@ export function ConfirmDialog({
         >
           {busy ? "Removing…" : confirmLabel}
         </button>
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={busy}
-          className="inline-flex h-10 items-center rounded-sm border border-edge px-4 text-sm text-tmuted hover:text-tprimary disabled:opacity-60"
-        >
+        <SecondaryButton onClick={onClose} disabled={busy}>
           Cancel
-        </button>
+        </SecondaryButton>
       </div>
     </Modal>
   );

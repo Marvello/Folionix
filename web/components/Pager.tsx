@@ -1,7 +1,9 @@
 "use client";
 
+import { SecondaryButton } from "@/components/Form";
+
 // Prev / "Page x of y" / Next control. Renders nothing when there's a single
-// page. Styling mirrors the schedule pager in BondsClient.
+// page.
 export default function Pager({
   page,
   totalPages,
@@ -16,21 +18,13 @@ export default function Pager({
   if (totalPages <= 1) return null;
   return (
     <div className="mt-3 flex items-center justify-between text-xs text-tdim">
-      <button
-        onClick={onPrev}
-        disabled={page <= 1}
-        className="rounded-md border border-edge px-2.5 py-1 text-tmuted disabled:cursor-not-allowed disabled:opacity-40"
-      >
+      <SecondaryButton size="sm" onClick={onPrev} disabled={page <= 1}>
         Prev
-      </button>
+      </SecondaryButton>
       <span>Page {page} of {totalPages}</span>
-      <button
-        onClick={onNext}
-        disabled={page >= totalPages}
-        className="rounded-md border border-edge px-2.5 py-1 text-tmuted disabled:cursor-not-allowed disabled:opacity-40"
-      >
+      <SecondaryButton size="sm" onClick={onNext} disabled={page >= totalPages}>
         Next
-      </button>
+      </SecondaryButton>
     </div>
   );
 }

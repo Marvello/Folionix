@@ -110,6 +110,12 @@ export function newsCutoffIso(days = NEWS_MAX_AGE_DAYS): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
+/** True when `dt` is older than `maxAgeMs`. Pairs with fmtAgo on freshness tags;
+ *  the clock read lives here so (server) component renders stay lint-pure. */
+export function isStale(dt: string | Date, maxAgeMs: number): boolean {
+  return Date.now() - new Date(dt).getTime() > maxAgeMs;
+}
+
 /** Relative "time ago" for data-freshness tags. Brand: every feed shows its age. */
 export function fmtAgo(dt: string | Date | null | undefined): string {
   if (!dt) return "—";
@@ -126,12 +132,15 @@ export function fmtAgo(dt: string | Date | null | undefined): string {
 /** Directional glyph paired with market color so meaning survives grayscale. */
 /** Gain/loss tone for a card; flat (0) stays neutral, matching dirGlyph's ◆. */
 export function tone(n: number | null | undefined): "up" | "down" | undefined {
-  if (n == null || n === 0) return undefined;
+  if (n == null || isFlat(n)) return undefined;
   return n > 0 ? "up" : "down";
 }
 
+/** Rounds to zero on screen (whole-rupiah cards): float residue like 1e-9 must read flat, not ▲. */
+const isFlat = (n: number): boolean => Math.abs(n) < 0.5;
+
 export function dirGlyph(n: number | null | undefined): string {
-  if (n == null || n === 0) return "◆";
+  if (n == null || isFlat(n)) return "◆";
   return n > 0 ? "▲" : "▼";
 }
 

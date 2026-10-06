@@ -45,6 +45,30 @@ export function correctPriceToBook(q: {
   return bookValueIdr > 0 ? price / bookValueIdr : null
 }
 
+/**
+ * Same currency trap for dividends: yahoo's trailingAnnualDividendYield divides
+ * a dividend paid in the *financial* currency by the IDR price, so USD reporters
+ * read ~0% (AADI: 0.03 USD / 12,125 IDR). Recompute from the trailing rate when
+ * the currencies disagree. Returns a fraction, like yahoo; null when we cannot
+ * convert (better no yield than a fabricated one).
+ */
+export function correctDividendYield(q: {
+  reportedYield: number | null
+  dividendRate: number | null | undefined
+  price: number | null
+  quoteCurrency: string | null | undefined
+  financialCurrency: string | null | undefined
+  fxToIdr: Map<string, number>
+}): number | null {
+  const { reportedYield, dividendRate, price, quoteCurrency, financialCurrency, fxToIdr } = q
+  if (reportedYield == null) return null
+  if (!financialCurrency || !quoteCurrency || financialCurrency === quoteCurrency) return reportedYield
+  if (quoteCurrency !== 'IDR') return null
+  const rate = fxToIdr.get(financialCurrency)
+  if (!rate || !price || dividendRate == null) return null
+  return (dividendRate * rate) / price
+}
+
 /** USD/IDR et al., memoised for a few minutes — fetchStock runs per ticker. */
 let fxCache: { at: number; rates: Map<string, number> } | null = null
 async function fxRatesToIdr(): Promise<Map<string, number>> {
@@ -93,6 +117,7 @@ export async function fetchStock(
   let peRatio: number | null = null
   let pbRatio: number | null = null
   let dividendYield: number | null = null
+  let dividendRate: number | null = null
   let bookValue: number | null = null
   let quoteCurrency: string | null = null
   let financialCurrency: string | null = null
@@ -112,6 +137,7 @@ export async function fetchStock(
     peRatio = quote.trailingPE ?? null
     pbRatio = quote.priceToBook ?? null
     dividendYield = quote.trailingAnnualDividendYield ?? null
+    dividendRate = quote.trailingAnnualDividendRate ?? null
     bookValue = quote.bookValue ?? null
     quoteCurrency = quote.currency ?? null
     financialCurrency = quote.financialCurrency ?? null
@@ -163,10 +189,13 @@ export async function fetchStock(
     }
   }
 
-  if (pbRatio != null && financialCurrency && financialCurrency !== quoteCurrency) {
-    pbRatio = correctPriceToBook({
-      reportedPb: pbRatio, price, bookValue, quoteCurrency, financialCurrency,
-      fxToIdr: await fxRatesToIdr(),
+  if (financialCurrency && financialCurrency !== quoteCurrency) {
+    const fxToIdr = await fxRatesToIdr()
+    if (pbRatio != null) {
+      pbRatio = correctPriceToBook({ reportedPb: pbRatio, price, bookValue, quoteCurrency, financialCurrency, fxToIdr })
+    }
+    dividendYield = correctDividendYield({
+      reportedYield: dividendYield, dividendRate, price, quoteCurrency, financialCurrency, fxToIdr,
     })
   }
 

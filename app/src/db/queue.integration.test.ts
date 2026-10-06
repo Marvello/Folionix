@@ -90,4 +90,30 @@ describe.skipIf(!url)('job queue + scheduler (live Postgres)', () => {
     const left = await c.query(`select current_price from stock_snapshots where ticker = 'RET.JK' order by current_price`)
     expect(left.rows.map(r => r.current_price)).toEqual([1, 3, 4])
   })
+
+  it('ledger numeric columns come back as numbers, and a full sell leaves exactly zero units', async () => {
+    await c.query(`delete from fund_purchases where fund_code = 'IT-NUM'`)
+    await c.query(`insert into fund_purchases (fund_code, units, buy_nav_per_unit, purchased_at, updated_at, side)
+                   values ('IT-NUM', 0.1, 1000, now(), now(), 'BUY'), ('IT-NUM', 0.2, 1000, now(), now(), 'BUY'),
+                          ('IT-NUM', 0.3, 1000, now(), now(), 'SELL')`)
+    const { rows } = await db.getPool().query(`select total_units from fund_product_summary where fund_code = 'IT-NUM'`)
+    expect(rows[0].total_units).toBe(0)
+    const { rows: u } = await db.getPool().query(`select units from fund_purchases where fund_code = 'IT-NUM' order by id limit 1`)
+    expect(typeof u[0].units).toBe('number')
+  })
+
+  it('batched writers: news cache dedupes by url, fund holdings are replaced atomically', async () => {
+    await c.query(`delete from news_cache where url like 'https://it.example/%'`)
+    const a = { headline: 'h', url: 'https://it.example/1', publishedAt: '2026-10-06T01:00:00Z' }
+    await db.saveNewsArticles('IT.JK', 'rss', [a, a, { headline: 'h2', url: 'https://it.example/2' }])
+    await db.saveNewsArticles('IT.JK', 'rss', [a])
+    const n = await c.query(`select count(*)::int n from news_cache where url like 'https://it.example/%'`)
+    expect(n.rows[0].n).toBe(2)
+
+    const h = (label: string) => ({ fund_code: 'IT-F', label, ticker: null, percentage: 10, as_of: '2026-10-01' })
+    await db.replaceFundHoldings('IT-F', [h('A'), h('B')])
+    await db.replaceFundHoldings('IT-F', [h('C')])
+    const f = await c.query(`select label from fund_holdings where fund_code = 'IT-F'`)
+    expect(f.rows).toEqual([{ label: 'C' }])
+  })
 })

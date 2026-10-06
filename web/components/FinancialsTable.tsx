@@ -1,5 +1,5 @@
 import type { StockFinancialRow } from "@/lib/types";
-import { fmtIdrCompact, fmtAgo } from "@/lib/format";
+import { fmtIdrCompact, fmtAgo, isStale } from "@/lib/format";
 import { Sparkline } from "./Sparkline";
 import EmptyState from "./EmptyState";
 
@@ -51,7 +51,7 @@ export default function FinancialsTable({ rows }: { rows: StockFinancialRow[] })
     return <EmptyState message="No quarterly financials published for this ticker." />;
   }
   const newest = rows[0]!;
-  const stale = Date.now() - new Date(newest.fetched_at).getTime() > STALE_MS;
+  const stale = isStale(newest.fetched_at, STALE_MS);
   const withEps = showEpsColumn(rows);
   return (
     <section>

@@ -1,5 +1,6 @@
 "use client";
 
+import { IconButton } from "@/components/Form";
 import { useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { fmtEventAmount, type CalendarEvent, type CalendarEventKind } from "@/lib/calendarEvents";
@@ -52,12 +53,12 @@ export default function ActivityCalendar({ events }: { events: CalendarEvent[] }
         <h2 className="font-semibold text-tprimary">Activity Calendar</h2>
         <div className="flex items-center gap-1">
           <span className="mr-1 text-xs text-tdim" aria-live="polite">{monthLabel}</span>
-          <button type="button" onClick={() => shift(-1)} aria-label="Previous month" className="rounded-md border border-edge p-1 text-tmuted hover:text-tprimary">
+          <IconButton onClick={() => shift(-1)} aria-label="Previous month" className="border border-edge">
             <ChevronLeft size={14} />
-          </button>
-          <button type="button" onClick={() => shift(1)} aria-label="Next month" className="rounded-md border border-edge p-1 text-tmuted hover:text-tprimary">
+          </IconButton>
+          <IconButton onClick={() => shift(1)} aria-label="Next month" className="border border-edge">
             <ChevronRight size={14} />
-          </button>
+          </IconButton>
         </div>
       </div>
 

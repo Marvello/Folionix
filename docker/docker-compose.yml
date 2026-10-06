@@ -1,3 +1,10 @@
+# Bounded json-file logs (default is unbounded and fills the disk over months).
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
 
   # Pin a deploy: FOLIONIX_TAG=<8-char-sha> docker compose -f docker/docker-compose.yml up -d
@@ -8,6 +15,7 @@ services:
     image: postgres:18-alpine
     container_name: folionix-db
     restart: unless-stopped
+    logging: *logging
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-folionix}
       - POSTGRES_USER=${POSTGRES_USER:-folionix}
@@ -35,6 +43,7 @@ services:
     image: marvellooni/folionix-app:${FOLIONIX_TAG:-latest}
     container_name: folionix-bot
     restart: unless-stopped
+    logging: *logging
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
@@ -55,6 +64,7 @@ services:
     image: marvellooni/folionix-app:${FOLIONIX_TAG:-latest}
     container_name: folionix-graph
     restart: unless-stopped
+    logging: *logging
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
@@ -62,6 +72,13 @@ services:
     extra_hosts:
       - "ollama-host:host-gateway"
     command: node dist/graph/runner.js
+    # Heartbeat stamped every loop; a cycle can run long (daily baseline), hence 1h.
+    healthcheck:
+      test: ["CMD", "node", "dist/utils/heartbeat.js", "3600"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     depends_on:
       folionix-db:
         condition: service_healthy
@@ -75,6 +92,7 @@ services:
     image: marvellooni/folionix-app:${FOLIONIX_TAG:-latest}
     container_name: folionix-worker
     restart: unless-stopped
+    logging: *logging
     env_file: ../.env
     environment:
       - TZ=Asia/Jakarta
@@ -82,6 +100,12 @@ services:
     extra_hosts:
       - "ollama-host:host-gateway"
     command: node dist/graph/worker.js
+    healthcheck:
+      test: ["CMD", "node", "dist/utils/heartbeat.js", "1800"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
     depends_on:
       folionix-db:
         condition: service_healthy
@@ -95,6 +119,7 @@ services:
     image: marvellooni/folionix-web:${FOLIONIX_TAG:-latest}
     container_name: folionix-web
     restart: unless-stopped
+    logging: *logging
     environment:
       - TZ=Asia/Jakarta
       - DATABASE_URL=postgresql://${POSTGRES_USER:-folionix}:${POSTGRES_PASSWORD}@folionix-db:5432/${POSTGRES_DB:-folionix}
@@ -103,6 +128,12 @@ services:
       - NEXT_PUBLIC_APP_VERSION=${FOLIONIX_TAG:-latest}
     ports:
       - "3000:3000"
+    healthcheck:   # image has no curl/wget; /api/health also checks the DB
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       folionix-db:
         condition: service_healthy

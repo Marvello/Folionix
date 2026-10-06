@@ -111,7 +111,8 @@ export async function fetchNewsForTicker(ticker: string, depth: Depth): Promise<
 
   // Fire-and-forget cache write — don't block the caller. Cache is keyed by
   // the yahoo symbol (storage convention); cleanTicker is only for feed search.
-  void saveNewsArticles(ticker, 'rss', toCache)
+  // Fire-and-forget, but never unhandled: a rejected promise would crash the process.
+  saveNewsArticles(ticker, 'rss', toCache).catch(err => console.error('[news] cache write failed:', err instanceof Error ? err.message : err))
 
   return articles.slice(0, limit)
 }
@@ -186,7 +187,8 @@ export async function summarizeNewsWithLlm(
       const field = (v: unknown) => (typeof v === 'string' && untrusted(v, 200)) || null
       const catalyst = field(parsed.catalyst)
       const risk = field(parsed.risk)
-      void saveSentiment(ticker, depth, summary, score, { themes, catalyst, risk })
+      saveSentiment(ticker, depth, summary, score, { themes, catalyst, risk })
+        .catch(err => console.error('[news] sentiment cache write failed:', err instanceof Error ? err.message : err))
       return withScoreHeader(summary, score)
     }
 

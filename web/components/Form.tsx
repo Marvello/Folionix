@@ -13,16 +13,19 @@ export const errText = (e: unknown): string => (e instanceof Error ? e.message :
 export function Field({
   label,
   optional,
+  inline,
   className = "",
   children,
 }: {
   label: React.ReactNode;
   optional?: boolean;
+  /** Label left, control right on one row (e.g. per-item amount lists). */
+  inline?: boolean;
   className?: string;
   children: React.ReactNode;
 }) {
   return (
-    <label className={`flex flex-col gap-1 ${className}`}>
+    <label className={`flex ${inline ? "items-center justify-between gap-3" : "flex-col gap-1"} ${className}`}>
       <span className="text-xs text-tmuted">
         {label}
         {optional && <span className="ml-1 text-tdim">optional</span>}
@@ -46,8 +49,41 @@ export function PrimaryButton({
   );
 }
 
-export const secondaryBtnCls =
-  "inline-flex h-10 items-center justify-center gap-1.5 rounded-sm border border-edge px-4 text-sm text-tmuted hover:text-tprimary disabled:opacity-60";
+const secondarySize = {
+  md: "h-10 px-4 text-sm", // dialog/toolbar actions, same box as PrimaryButton
+  sm: "h-8 px-3 text-xs", // inline row actions, pagers (32px hit target)
+} as const;
+
+/** Outlined neutral action, rounded-sm like the primary button. */
+export function SecondaryButton({
+  className = "",
+  type = "button",
+  size = "md",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { size?: keyof typeof secondarySize }) {
+  return (
+    <button
+      type={type}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-sm border border-edge text-tmuted transition-colors duration-[120ms] hover:text-tprimary disabled:cursor-not-allowed disabled:opacity-50 ${secondarySize[size]} ${className}`}
+      {...props}
+    />
+  );
+}
+
+/** Square icon-only button (32px hit target). Always pass an aria-label. */
+export function IconButton({
+  className = "",
+  type = "button",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { "aria-label": string }) {
+  return (
+    <button
+      type={type}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-sm text-tdim transition-colors duration-[120ms] hover:text-tprimary disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+      {...props}
+    />
+  );
+}
 
 /** Busy flag + in-dialog error for an async submit/remove. */
 export function useAsyncAction<K extends string = "save">() {
@@ -99,9 +135,9 @@ export function FormActions({
       )}
       <div className="mt-4 flex items-center gap-2">
         <PrimaryButton disabled={busy || disabled}>{saving ? busyLabel : submitLabel}</PrimaryButton>
-        <button type="button" onClick={onCancel} disabled={busy} className={secondaryBtnCls}>
+        <SecondaryButton onClick={onCancel} disabled={busy}>
           {cancelLabel}
-        </button>
+        </SecondaryButton>
         {children}
       </div>
     </>

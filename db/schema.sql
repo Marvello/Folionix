@@ -5,7 +5,8 @@
 create table if not exists public.schema_migrations (
     version    varchar          primary key,
     name       text             not null,
-    applied_at timestamptz      not null default now()
+    applied_at timestamptz      not null default now(),
+    checksum   text             -- sha256 of the file as applied; the runner backfills/compares
 );
 
 -- ── stock_snapshots ──
