@@ -219,6 +219,12 @@ export async function upsertWatchlistItem(ticker: string, notes: string) {
   );
 }
 
+/** Turn an auto-added peer row into a user entry; the weekly peer refresh never touches `user` rows. */
+export async function promotePeer(ticker: string) {
+  await requireSession();
+  await getPool().query(`UPDATE watchlist SET kind = 'user' WHERE ticker = $1 AND kind = 'peer'`, [vTicker(ticker)]);
+}
+
 export async function deleteWatchlistItem(ticker: string) {
   await requireSession();
   await getPool().query(`DELETE FROM watchlist WHERE ticker = $1`, [vTicker(String(ticker).toUpperCase())]);

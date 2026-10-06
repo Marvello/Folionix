@@ -116,4 +116,15 @@ describe.skipIf(!url)('job queue + scheduler (live Postgres)', () => {
     const f = await c.query(`select label from fund_holdings where fund_code = 'IT-F'`)
     expect(f.rows).toEqual([{ label: 'C' }])
   })
+
+  it('peer watchlist sync only ever touches kind=peer rows', async () => {
+    await c.query(`delete from watchlist where ticker like 'PSYNC%'`)
+    await c.query(`insert into watchlist (ticker, kind, notes, added_at) values ('PSYNC1.JK', 'user', 'mine', now()), ('PSYNC2.JK', 'peer', 'old', now())`)
+    await db.syncPeerWatchlist(new Map([['PSYNC1.JK', 'Peer of X · G'], ['PSYNC3.JK', 'Peer of Y · G']]))
+    const { rows } = await c.query(`select ticker, kind, notes from watchlist where ticker like 'PSYNC%' order by ticker`)
+    expect(rows).toEqual([
+      { ticker: 'PSYNC1.JK', kind: 'user', notes: 'mine' },          // user row untouched
+      { ticker: 'PSYNC3.JK', kind: 'peer', notes: 'Peer of Y · G' }, // new peer added; stale peer PSYNC2 removed
+    ])
+  })
 })

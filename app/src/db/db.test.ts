@@ -195,6 +195,7 @@ describe('db', () => {
     'operating_cashflow', 'target_mean', 'target_high', 'target_low',
     'recommendation_key', 'analyst_count', 'shares_outstanding', 'float_shares',
     'held_pct_insiders', 'held_pct_institutions', 'change_52w',
+      'market_cap', 'total_revenue', 'ebitda', 'trailing_pe',
   ] as const
 
   it('saveKeyStats builds INSERT/UPDATE placeholders that line up with the values array', async () => {
@@ -208,7 +209,7 @@ describe('db', () => {
     await saveKeyStats('BBCA', stats)
     const [sql, values] = mockQuery.mock.calls[0] as [string, unknown[]]
 
-    // ticker + 28 metrics = 29 positional values; fetched_at is `now()`, not a param.
+    // ticker + one value per metric; fetched_at is `now()`, not a param.
     expect(values).toHaveLength(1 + KEY_STAT_COLS.length)
     expect(values[0]).toBe('BBCA')
 

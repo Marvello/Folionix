@@ -243,6 +243,19 @@ describe('mapKeyStats', () => {
     expect(out.change_52w).toBe(0.184)
   })
 
+  it('converts revenue/EBITDA from a USD reporter, keeps IDR market cap and P/E as is', async () => {
+    const { mapKeyStats } = await import('./market.js')
+    const out = mapKeyStats({
+      summaryDetail: { currency: 'IDR', trailingPE: 5.4 },
+      price: { regularMarketPrice: 2600, marketCap: 8.0e13 },
+      financialData: { financialCurrency: 'USD', totalRevenue: 5.0e9, ebitda: 1.5e9 },
+    }, new Map([['USD', 17_900]]))
+    expect(out.market_cap).toBe(8.0e13)
+    expect(out.trailing_pe).toBe(5.4)
+    expect(out.total_revenue).toBeCloseTo(5.0e9 * 17_900)
+    expect(out.ebitda).toBeCloseTo(1.5e9 * 17_900)
+  })
+
   it('returns nulls rather than undefined for a sparse small-cap payload', async () => {
     const { mapKeyStats } = await import('./market.js')
     // BSSR shape: key statistics present, no analyst coverage at all.
@@ -466,5 +479,38 @@ describe('mapSplits', () => {
     const { mapSplits } = await import('./market.js')
     expect(mapSplits(undefined)).toEqual([])
     expect(mapSplits([])).toEqual([])
+  })
+})
+
+describe('computeAnnualMultiples', () => {
+  it('values each fiscal year at its year-end price, fx-converting financials', async () => {
+    const { computeAnnualMultiples } = await import('./market.js')
+    const rows = computeAnnualMultiples(
+      [
+        { date: '2024-12-31', netIncome: 100, stockholdersEquity: 400, totalRevenue: 1000, EBITDA: 200,
+          totalDebt: 300, cashAndCashEquivalents: 100, ordinarySharesNumber: 10 },
+        { date: '2023-12-31' },   // empty placeholder year → skipped
+      ],
+      [{ date: '2024-12-20', close: 2000 }, { date: '2025-01-03', close: 9999 }],
+      10,   // e.g. 1 USD = 10 IDR
+    )
+    expect(rows).toHaveLength(1)
+    const r = rows[0]!
+    // mcap = 2000 × 10 = 20,000 IDR; financials ×10 → NI 1,000, equity 4,000, revenue 10,000, EBITDA 2,000, net debt 2,000
+    expect(r.price).toBe(2000)
+    expect(r.pe).toBeCloseTo(20)
+    expect(r.pb).toBeCloseTo(5)
+    expect(r.ps).toBeCloseTo(2)
+    expect(r.ev_ebitda).toBeCloseTo(11)   // (20,000 + 2,000) / 2,000
+  })
+
+  it('gives no multiple for losses or negative equity', async () => {
+    const { computeAnnualMultiples } = await import('./market.js')
+    const [r] = computeAnnualMultiples(
+      [{ date: '2024-12-31', netIncome: -5, stockholdersEquity: -1, totalRevenue: 50, ordinarySharesNumber: 1 }],
+      [{ date: '2024-12-31', close: 10 }], 1)
+    expect(r!.pe).toBeNull()
+    expect(r!.pb).toBeNull()
+    expect(r!.ps).toBeCloseTo(0.2)
   })
 })

@@ -1,3 +1,40 @@
+# Feature: sector-aware peer valuation (B1 + B2) — branch `feat/peer-valuation`
+
+Decisions (user, 2026-10-06): peers come from the official IDX-IC classification
+(`/primary/ListedCompany/GetCompanyProfiles`, all 962 listings); peers are added to the
+watchlist as kind `peer` **with full watchlist treatment** (analysis, alerts, deep runs);
+the holdings table gets an expandable "Peers" row; valuation uses **3 comparisons**.
+
+## Spec
+- Peer group = same sub-industry (fallback: industry when < 3 members), top 8 by market cap, excluding the stock itself.
+- Lens by IDX sector: Keuangan → P/B ↔ ROE · Barang Konsumen Primer/Non-Primer, Kesehatan → P/E ↔ earnings growth/PEG ·
+  Infrastruktur, Transportasi & Logistik, Perindustrian → EV/EBITDA ↔ EBITDA margin, net debt/EBITDA ·
+  Energi, Barang Baku → EV/EBITDA on 4-yr average EBITDA ↔ net debt/EBITDA · Teknologi or loss-making → P/S ↔ revenue growth ·
+  Properti & Real Estat → P/B ↔ dividend yield.
+- Comparisons: (1) multiple vs peer median (±15% = on par; needs ≥ 3 peers with data);
+  (2) quality metric vs peer median → premium justified?; (3) multiple vs own 4-yr average (yahoo annuals + year-end prices).
+- All ratios computed in code with fx correction (yahoo's EV/EBITDA is wrong for USD reporters: ADRO 85,336×).
+
+## Plan
+- [x] P1 migration 049: watchlist kind `peer`; `stock_classification`; key-stats revenue/ebitda/market-cap columns; `stock_annual_multiples`; `stock_valuation` (computed result, read by web)
+- [x] P2 providers: IDX classification fetch; key stats + revenue/EBITDA (fx); annual history → yearly multiples
+- [x] P3 `ai/valuation.ts` (pure): lens mapping, medians, verdicts, prompt block — unit-tested
+- [x] P4 `services/peers.ts`: weekly classification + peer-group refresh → watchlist `peer` rows (add/update reason/remove stale; never touch user rows)
+- [x] P5 daily valuation compute after the fundamentals sweep → `stock_valuation`
+- [x] P6 LLM: valuation block in analysis + persona prompts; restore DEEP sector comparison; relative valuation sub-score
+- [x] P7 web: expandable Peers row in holdings; peer badge + reason + "Promote" on watchlist
+- [x] P8 verify on a prod-dump restore: show the comparison block for every holding before deploy
+
+### Result (verified on a restore of the prod dump)
+962 classified · 80 peer links for 10 holdings · 51 peers on the watchlist · 10 valuations, e.g.
+- BBCA: P/B 2.8× vs peers 1.3× (+112%, premium) · ROE 21.8% vs 13.6% (stronger) · vs own 4y 4.4× (−38%) → premium backed by stronger ROE
+- ADRO: EV/EBITDA (mid-cycle) 2.9× vs 10.5× (−72%) · net debt/EBITDA 0.4× vs 0.9× (stronger) → possible value
+  (large-cap coal peers BYAN/DSSA/CUAN/BUMI genuinely trade at 19–27×)
+- TOWR: EV/EBITDA 7.0× vs 11.7× (−40%) · margin similar · vs own 14× → looks cheap
+UI checked in Chrome: Peers panel (neutral premium/discount colours), watchlist Peers (51) section, Promote.
+
+---
+
 # Follow-ups after the 2026-10-06 review deploy (branch `fix/review-followups`)
 
 Source: `tasks/review-2026-10-06.md` ([~]/[-] items) + findings during the deploy.
@@ -40,10 +77,12 @@ Data & analysis
 - [ ] B5 Corporate-action awareness in analysis (splits, rights, ex-dates within N days) — data already in `corporate_actions` / `dividend_schedule`
 
 Ops & reliability
-- [ ] B6 Pin prod images to `:<sha8>` instead of `:latest` + `imagePullPolicy: Always` — today any pod restart is an unplanned deploy (incl. migrations)
-- [ ] B7 Off-host backup copy (dumps live only on turingcm4-1) + a scheduled restore drill into a scratch DB
+- [x] B6 Pin prod images to `:<sha8>` instead of `:latest` + `imagePullPolicy: Always` — today any pod restart is an unplanned deploy (incl. migrations)
+- [x] B7 Off-host backup copy (dumps live only on turingcm4-1) + a scheduled restore drill into a scratch DB
 - [ ] B8 Failure alerting: Telegram ping when the backup CronJob, a scheduled job, or the worker fails / stalls (runner heartbeat row)
 - [ ] B9 Longhorn capacity: both RK1 disks fully scheduled (80.0/81.8 GB) — reclaim or retune reserved space before any app needs a new PVC (homelab-wide)
+
+  - B6/B7 done 2026-10-06: app/web pinned to `:8796375c` + `IfNotPresent` (deploy = bump tag in manifest + apply); tower pulls dumps daily 08:00 WIB (tower is off 20:00–07:00; 7-day retention on both copies, mode 600, staleness check) — one-off restore drill passed. Scheduled drills not set up.
 
 Security
 - [ ] B10 Move inline secrets out of `homeserver/k8s/folionix/folionix.yaml` (sealed/SOPS secret); rotate `AIREVIEW_API_TOKEN` (printed in a session on 2026-10-06)

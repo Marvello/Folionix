@@ -302,6 +302,12 @@ export interface KeyStats {
   held_pct_insiders: number | null
   held_pct_institutions: number | null
   change_52w: number | null
+  // Valuation inputs (migration 049), IDR: market cap is quote currency; revenue
+  // and EBITDA are converted from the financial currency like the cash/debt fields.
+  market_cap: number | null
+  total_revenue: number | null
+  ebitda: number | null
+  trailing_pe: number | null
 }
 
 /** Yahoo returns undefined for absent fields; the DB wants null. */
@@ -395,6 +401,11 @@ export function mapKeyStats(raw: RawSummary, fxToIdr: Map<string, number>): KeyS
     held_pct_insiders: n(k.heldPercentInsiders),
     held_pct_institutions: n(k.heldPercentInstitutions),
     change_52w: n(k['52WeekChange']),
+    market_cap: n(p.marketCap) ?? n(sd.marketCap),
+    total_revenue: money(n(f.totalRevenue)),
+    ebitda: money(n(f.ebitda)),
+    // yahoo computes trailingPE from quote-currency EPS (see trailing_eps), so it is consistent.
+    trailing_pe: n(sd.trailingPE),
   }
 }
 
@@ -551,4 +562,105 @@ export async function fetchSplits(ticker: string, since?: Date): Promise<SplitEv
     console.error(`[market] splits ${symbol}:`, err instanceof Error ? err.message : err)
     return []
   }
+}
+
+// ── OWN-HISTORY MULTIPLES (annual) ──
+
+export interface AnnualMultiples {
+  period_end: string
+  price: number | null
+  net_income: number | null
+  equity: number | null
+  revenue: number | null
+  ebitda: number | null
+  net_debt: number | null
+  shares: number | null
+  pe: number | null
+  pb: number | null
+  ps: number | null
+  ev_ebitda: number | null
+}
+
+const pos = (v: number | null): number | null => (v != null && v > 0 ? v : null)
+const ratio = (num: number | null, den: number | null): number | null => (num != null && pos(den) ? num / den! : null)
+
+/**
+ * Pure: yearly multiples at the fiscal-year-end price, all in IDR. `fx` converts
+ * the financial currency (1 for IDR reporters).
+ * ponytail: uses today's fx for every year — historical rates aren't stored; a
+ * USD reporter's older multiples drift with USD/IDR (~±10% over 4 years).
+ */
+export function computeAnnualMultiples(
+  annuals: Array<Record<string, unknown>>,
+  closes: Array<{ date: string; close: number }>,
+  fx: number,
+): AnnualMultiples[] {
+  const out: AnnualMultiples[] = []
+  for (const a of annuals) {
+    const d = a.date instanceof Date ? a.date.toISOString().slice(0, 10) : typeof a.date === 'string' ? a.date.slice(0, 10) : null
+    if (!d) continue
+    const conv = (v: number | null) => (v == null ? null : v * fx)
+    const netIncome = conv(n(a.netIncomeCommonStockholders) ?? n(a.netIncome))
+    const equity = conv(n(a.commonStockEquity) ?? n(a.stockholdersEquity))
+    const revenue = conv(n(a.totalRevenue))
+    const ebitda = conv(n(a.EBITDA) ?? n(a.normalizedEBITDA))
+    const debt = n(a.totalDebt)
+    const cash = n(a.cashAndCashEquivalents)
+    const netDebt = debt == null ? null : conv(debt - (cash ?? 0))
+    const shares = n(a.ordinarySharesNumber) ?? n(a.shareIssued)
+    if (netIncome == null && equity == null && revenue == null) continue   // empty placeholder year
+    const price = [...closes].reverse().find((c) => c.date <= d)?.close ?? null
+    const mcap = price != null && shares != null ? price * shares : null
+    out.push({
+      period_end: d, price, net_income: netIncome, equity, revenue, ebitda, net_debt: netDebt, shares,
+      pe: ratio(mcap, netIncome),
+      pb: ratio(mcap, equity),
+      ps: ratio(mcap, revenue),
+      ev_ebitda: mcap != null ? ratio(mcap + (netDebt ?? 0), ebitda) : null,
+    })
+  }
+  return out.sort((x, y) => y.period_end.localeCompare(x.period_end))
+}
+
+/** Last ~5 fiscal years of multiples for a ticker; [] on any failure. */
+export async function fetchAnnualMultiples(ticker: string): Promise<AnnualMultiples[]> {
+  const symbol = normalizeTicker(ticker)
+  try {
+    const since = new Date(Date.now() - 6 * 365 * 86_400_000)
+    const [annuals, chart, summary] = await Promise.all([
+      withRetry(() => yf.fundamentalsTimeSeries(symbol, { period1: since, type: 'annual', module: 'all' }, { validateResult: false })),
+      withRetry(() => yf.chart(symbol, { period1: since, interval: '1wk' })),
+      withRetry(() => yf.quoteSummary(symbol, { modules: ['financialData', 'summaryDetail'] }, { validateResult: false })),
+    ])
+    const fin = s((summary as RawSummary).financialData?.financialCurrency)
+    const quote = s((summary as RawSummary).summaryDetail?.currency)
+    let fx = 1
+    if (fin && quote && fin !== quote) {
+      const rate = quote === 'IDR' ? (await fxRatesToIdr()).get(fin) : undefined
+      if (!rate) return []   // cannot convert: no history rather than wrong history
+      fx = rate
+    }
+    const closes = (chart.quotes ?? [])
+      .filter((q) => q.close != null)
+      .map((q) => ({ date: q.date.toISOString().slice(0, 10), close: q.close as number }))
+    return computeAnnualMultiples(annuals as unknown as Array<Record<string, unknown>>, closes, fx)
+  } catch (err) {
+    console.error(`[market] annual multiples ${symbol}:`, err instanceof Error ? err.message : err)
+    return []
+  }
+}
+
+/** Market caps (IDR) for many tickers in a few batched quote calls. Missing → absent. */
+export async function fetchMarketCaps(tickers: string[]): Promise<Map<string, number>> {
+  const caps = new Map<string, number>()
+  const symbols = [...new Set(tickers.map(normalizeTicker))]
+  for (let i = 0; i < symbols.length; i += 40) {
+    try {
+      const rows = await withRetry(() => yf.quote(symbols.slice(i, i + 40)), 2, 500) as unknown as Array<{ symbol?: string; marketCap?: number }>
+      for (const r of rows) if (r.symbol && r.marketCap) caps.set(r.symbol, r.marketCap)
+    } catch (err) {
+      console.error('[market] market caps batch:', err instanceof Error ? err.message : err)
+    }
+  }
+  return caps
 }

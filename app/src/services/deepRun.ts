@@ -2,7 +2,7 @@ import 'dotenv/config'
 import { randomUUID } from 'node:crypto'
 import {
   enqueueAnalysisJobs, hasActiveRun, loadPortfolio, saveSnapshot,
-  getLatestSentiment, getLastAlertedAnalysis, saveAnalysis, markAnalysisSent, getKeyStats,
+  getLatestSentiment, getLastAlertedAnalysis, saveAnalysis, markAnalysisSent, getKeyStats, getValuation,
   savePersonaAnalysis, getRunPersonaResults,
 } from '../db/db'
 import { fetchStock } from '../providers/market'
@@ -48,12 +48,13 @@ export async function enqueueDeepRun(ticker: string): Promise<boolean> {
   const snap = await fetchStock(jk, pos?.avg_price ?? 0, pos?.lots ?? 0, pos?.notes ?? null)
   const snapshotId = await saveSnapshot(snap)
 
-  const [indicators, news, ks] = await Promise.all([
+  const [indicators, news, ks, valuation] = await Promise.all([
     computeTickerIndicators(jk),
     getLatestSentiment(jk),
     getKeyStats(jk),
+    getValuation(jk),
   ])
-  const scores = computeAnalystScores(snap, indicators, news?.score ?? null)
+  const scores = computeAnalystScores(snap, indicators, news?.score ?? null, valuation?.result ?? null)
 
   const personas = enabledPersonas()
   const payload: DeepRunPayload = {
@@ -79,6 +80,7 @@ export async function enqueueDeepRun(ticker: string): Promise<boolean> {
           current_ratio: ks.current_ratio ?? null, free_cashflow: ks.free_cashflow ?? null,
         }
       : null,
+    valuation: valuation?.summary ?? null,
     news: news
       ? { score: news.score, themes: news.themes ?? null, catalyst: news.catalyst ?? null, risk: news.risk ?? null }
       : null,

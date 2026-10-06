@@ -1,7 +1,7 @@
 import 'dotenv/config'
 import {
   loadPortfolio, saveSnapshot, getLatestSnapshot, saveAnalysis, getLatestAnalysis, getLastAlertedAnalysis,
-  getWatchlist, getSnapshotSeries, getSnapshotPrice,
+  getWatchlist, getSnapshotSeries, getSnapshotPrice, getValuation, getClassification,
 } from '../db/db'
 import { computeIndicators, toDailySeries, type Indicators } from '../ai/indicators'
 import { fetchStock } from '../providers/market'
@@ -132,7 +132,11 @@ async function analyzeOneTicker(
   ])
   const newsSentiment = sentiment || undefined
 
-  const prompt = buildPrompt(snap, null, depth, newsSentiment, undefined, indicators)
+  const [valuation, cls] = await Promise.all([getValuation(jk), getClassification(jk)])
+  const metadata = cls
+    ? { name: cls.name ?? undefined, sector: cls.sector ?? undefined, industry: cls.sub_industry ?? cls.industry ?? undefined }
+    : undefined
+  const prompt = buildPrompt(snap, null, depth, newsSentiment, metadata, indicators, valuation?.summary)
   // Temperature 0: this call decides the recommendation; sampling noise caused HOLD↔MONITOR alert churn.
   const { text: raw, model } = await callLlmWithModel(prompt, { temperature: 0 })
   const cleanHtml = cleanForTelegram(raw)

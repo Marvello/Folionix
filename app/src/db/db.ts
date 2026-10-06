@@ -216,6 +216,124 @@ export async function getKeyStats(ticker: string): Promise<Record<string, number
   return rows[0] ?? null
 }
 
+// ── PEER VALUATION ──
+
+export interface ClassificationRow {
+  ticker: string; name: string | null; sector: string | null; sub_sector: string | null
+  industry: string | null; sub_industry: string | null; board: string | null; listed_at: string | null
+}
+
+/** Upsert the full IDX classification list in one statement. */
+export async function upsertClassifications(rows: ClassificationRow[]): Promise<void> {
+  if (rows.length === 0) return
+  await q(
+    `INSERT INTO stock_classification (ticker, name, sector, sub_sector, industry, sub_industry, board, listed_at, updated_at)
+     SELECT ticker, name, sector, sub_sector, industry, sub_industry, board, listed_at, now()
+       FROM jsonb_to_recordset($1::jsonb) AS x(ticker text, name text, sector text, sub_sector text,
+            industry text, sub_industry text, board text, listed_at date)
+     ON CONFLICT (ticker) DO UPDATE SET
+       name = excluded.name, sector = excluded.sector, sub_sector = excluded.sub_sector,
+       industry = excluded.industry, sub_industry = excluded.sub_industry, board = excluded.board,
+       listed_at = excluded.listed_at, updated_at = excluded.updated_at`,
+    [JSON.stringify(rows)],
+  )
+}
+
+export async function getClassifications(): Promise<ClassificationRow[]> {
+  const { rows } = await q(`SELECT ticker, name, sector, sub_sector, industry, sub_industry, board, listed_at FROM stock_classification`)
+  return rows
+}
+
+export interface PeerRow { ticker: string; peer: string; rank: number; basis: string; group_name: string }
+
+/** Replace every holding's peer list atomically (the weekly refresh recomputes them all). */
+export async function replaceAllPeers(rows: PeerRow[]): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(`DELETE FROM stock_peers`)
+    if (rows.length === 0) return
+    await client.query(
+      `INSERT INTO stock_peers (ticker, peer, rank, basis, group_name)
+       SELECT ticker, peer, rank, basis, group_name
+         FROM jsonb_to_recordset($1::jsonb) AS x(ticker text, peer text, rank int, basis text, group_name text)`,
+      [JSON.stringify(rows)],
+    )
+  })
+}
+
+export async function getAllPeers(): Promise<PeerRow[]> {
+  const { rows } = await q(`SELECT ticker, peer, rank, basis, group_name FROM stock_peers ORDER BY ticker, rank`)
+  return rows
+}
+
+/**
+ * Make the watchlist's `peer` rows match `notes` (ticker → reason). Only touches
+ * kind = 'peer': a ticker the user already watches keeps its own row and kind.
+ */
+export async function syncPeerWatchlist(notes: Map<string, string>): Promise<{ added: number; removed: number }> {
+  return withTransaction(async (client) => {
+    const rows = [...notes].map(([ticker, note]) => ({ ticker, note }))
+    const { rowCount: removed } = await client.query(
+      `DELETE FROM watchlist WHERE kind = 'peer' AND NOT (ticker = ANY($1::text[]))`, [rows.map((r) => r.ticker)])
+    const { rowCount: added } = await client.query(
+      `INSERT INTO watchlist (ticker, kind, notes, added_at)
+       SELECT ticker, 'peer', note, now() FROM jsonb_to_recordset($1::jsonb) AS x(ticker text, note text)
+       ON CONFLICT (ticker) DO UPDATE SET notes = excluded.notes WHERE watchlist.kind = 'peer'`,
+      [JSON.stringify(rows)],
+    )
+    return { added: added ?? 0, removed: removed ?? 0 }
+  })
+}
+
+export async function saveAnnualMultiples(ticker: string, rows: Array<{ period_end: string }>): Promise<void> {
+  if (rows.length === 0) return
+  await q(
+    `INSERT INTO stock_annual_multiples (ticker, period_end, price, net_income, equity, revenue, ebitda, net_debt, shares, pe, pb, ps, ev_ebitda, fetched_at)
+     SELECT $1, period_end, price, net_income, equity, revenue, ebitda, net_debt, shares, pe, pb, ps, ev_ebitda, now()
+       FROM jsonb_to_recordset($2::jsonb) AS x(period_end date, price float8, net_income float8, equity float8, revenue float8,
+            ebitda float8, net_debt float8, shares float8, pe float8, pb float8, ps float8, ev_ebitda float8)
+     ON CONFLICT (ticker, period_end) DO UPDATE SET
+       price = excluded.price, net_income = excluded.net_income, equity = excluded.equity, revenue = excluded.revenue,
+       ebitda = excluded.ebitda, net_debt = excluded.net_debt, shares = excluded.shares, pe = excluded.pe,
+       pb = excluded.pb, ps = excluded.ps, ev_ebitda = excluded.ev_ebitda, fetched_at = excluded.fetched_at`,
+    [ticker, JSON.stringify(rows)],
+  )
+}
+
+/** Everything the valuation needs per ticker, in one round trip. */
+export async function getValuationInputs(tickers: string[]): Promise<Array<Record<string, any>>> {
+  const { rows } = await q(
+    `SELECT t.ticker, c.sector, c.sub_industry, k.market_cap, k.trailing_pe, k.price_to_book, k.total_revenue, k.ebitda,
+            k.total_debt, k.total_cash, k.return_on_equity, k.earnings_growth, k.revenue_growth, k.ebitda_margins,
+            (SELECT s.div_yield_pct FROM stock_snapshots s WHERE s.ticker = t.ticker ORDER BY s.fetched_at DESC, s.id DESC LIMIT 1) AS div_yield_pct,
+            COALESCE((SELECT jsonb_agg(jsonb_build_object('pe', a.pe, 'pb', a.pb, 'ps', a.ps, 'ev_ebitda', a.ev_ebitda,
+                                                         'ebitda', a.ebitda, 'net_income', a.net_income) ORDER BY a.period_end DESC)
+                        FROM stock_annual_multiples a WHERE a.ticker = t.ticker), '[]'::jsonb) AS annual
+       FROM unnest($1::text[]) AS t(ticker)
+       LEFT JOIN stock_classification c ON c.ticker = t.ticker
+       LEFT JOIN stock_key_stats k ON k.ticker = t.ticker`,
+    [tickers],
+  )
+  return rows
+}
+
+export async function saveValuation(ticker: string, lens: string, summary: string, result: unknown): Promise<void> {
+  await q(
+    `INSERT INTO stock_valuation (ticker, computed_at, lens, summary, result) VALUES ($1, now(), $2, $3, $4)
+     ON CONFLICT (ticker) DO UPDATE SET computed_at = now(), lens = excluded.lens, summary = excluded.summary, result = excluded.result`,
+    [ticker, lens, summary, JSON.stringify(result)],
+  )
+}
+
+export async function getValuation(ticker: string): Promise<{ summary: string; lens: string; computed_at: string; result: any } | null> {
+  const { rows } = await q(`SELECT summary, lens, computed_at, result FROM stock_valuation WHERE ticker = $1`, [ticker])
+  return rows[0] ?? null
+}
+
+export async function getClassification(ticker: string): Promise<ClassificationRow | null> {
+  const { rows } = await q(`SELECT ticker, name, sector, sub_sector, industry, sub_industry, board, listed_at FROM stock_classification WHERE ticker = $1`, [ticker])
+  return rows[0] ?? null
+}
+
 // ── RETENTION ──
 
 /**
@@ -838,6 +956,7 @@ const KEY_STAT_COLS = [
   'operating_cashflow', 'target_mean', 'target_high', 'target_low',
   'recommendation_key', 'analyst_count', 'shares_outstanding', 'float_shares',
   'held_pct_insiders', 'held_pct_institutions', 'change_52w',
+  'market_cap', 'total_revenue', 'ebitda', 'trailing_pe',
 ] as const
 
 export async function saveKeyStats(ticker: string, stats: KeyStats): Promise<void> {
