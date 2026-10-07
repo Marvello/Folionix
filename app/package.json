@@ -26,7 +26,7 @@
     "got-scraping": "^4.2.1",
     "grammy": "^1",
     "marked": "^18.0.6",
-    "nodemailer": "^10.0.1",
+    "nodemailer": "^10.0.15",
     "pg": "^8.23.0",
     "rss-parser": "^3",
     "tough-cookie": "^6.0.2",
