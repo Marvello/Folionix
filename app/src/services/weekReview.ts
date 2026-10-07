@@ -1,7 +1,11 @@
 import 'dotenv/config'
-import { aggregatePortfolio, type PortfolioAggregate } from '../../../lib/aggregate'
-import { displayTicker, fmtIdr, wibDateOffset } from '../../../lib/format'
-import type { LlmAnalysisRow, NewsSentimentRow, RecommendationAccuracyRow, StockSnapshotRow } from '../../../lib/types'
+import { aggregatePortfolio, type AggregateInput, type PortfolioAggregate } from '../../../lib/aggregate'
+import { estimateCouponNet, inferPaymentsPerYear, latestPaymentByHolding } from '../../../lib/coupon'
+import { displayTicker, fmtIdr, wibDateOffset, WIB } from '../../../lib/format'
+import type {
+  AccountChargeRow, BondHoldingRow, DividendScheduleRow, FundDistributionRow, FundPurchaseRow, GoldPurchaseRow,
+  LlmAnalysisRow, NewsSentimentRow, RecommendationAccuracyRow, StockDividendRow, StockSnapshotRow, StockTransactionRow,
+} from '../../../lib/types'
 import {
   getAllPositions, getLatestSnapshots, getSnapshotBefore,
   getGoldPurchases, getLatestGoldPrices, getGoldPriceBefore,
@@ -9,6 +13,7 @@ import {
   getFundPurchases, getLatestFundNavs, getFundNavBefore,
   getForexRatesToIdr, getStockDividends, getFundDistributions, getAccountCharges,
   getAnalysesBetween, getRecommendationAccuracy, getSentimentsBetween, getSnapshotPricesSince,
+  getStockTransactions, getBondCouponPaymentRows, getBondCouponScheduleDates, getDividendScheduleBetween,
   saveWeeklyReview, markWeeklyReviewEmailed,
 } from '../db/db'
 import { callLlm } from '../ai/llm'
@@ -98,6 +103,7 @@ export function buildNumbersSection(
   current: PortfolioAggregate,
   weekAgo: PortfolioAggregate | null,
   stockChanges: StockWeekChange[],
+  assetMoves: AssetMove[] = [],
 ): string {
   const wow = (now: number, before: number | null | undefined): string => {
     if (before == null || before === 0) return 'N/A'
@@ -122,6 +128,14 @@ export function buildNumbersSection(
     const sorted = [...stockChanges].sort((a, b) => (b.changePct ?? -Infinity) - (a.changePct ?? -Infinity))
     for (const s of sorted) {
       lines.push(`| ${displayTicker(s.ticker)} | ${idr(s.priceNow)} | ${idr(s.priceWeekAgo)} | ${pct(s.changePct)} |`)
+    }
+    lines.push('')
+  }
+  if (assetMoves.length > 0) {
+    lines.push('### Gold & Funds — week change', '', '| Asset | Kind | Unit | Now | Week Ago | Change |', '|---|---|---|---:|---:|---:|')
+    for (const m of assetMoves) {
+      const change = m.now != null && m.weekAgo ? ((m.now - m.weekAgo) / m.weekAgo) * 100 : null
+      lines.push(`| ${m.name} | ${m.kind} | ${m.unit} | ${num(m.now)} | ${num(m.weekAgo)} | ${pct(change)} |`)
     }
     lines.push('')
   }
@@ -207,11 +221,310 @@ export function buildNewsSection(sentiments: NewsSentimentRow[]): string {
   return lines.join('\n')
 }
 
+// ── WHOLE-PORTFOLIO SECTIONS (allocation, activity, coming up) ──────────────
+
+export interface HoldingValue {
+  kind: 'Stock' | 'Gold' | 'Fund' | 'Bond'
+  name: string
+  value: number
+}
+
+/** Per-unit price of a non-stock asset now vs a week ago (gold per gram, fund NAV per unit). */
+export interface AssetMove {
+  kind: 'Gold' | 'Fund'
+  name: string
+  unit: string
+  now: number | null
+  weekAgo: number | null
+}
+
+export interface ActivityRow {
+  date: string
+  kind: string
+  name: string
+  detail: string
+  amount: number | null
+  side?: 'BUY' | 'SELL'
+}
+
+export interface WeekActivity {
+  trades: ActivityRow[]
+  income: ActivityRow[]
+  fees: ActivityRow[]
+}
+
+export interface UpcomingEvent {
+  date: string
+  event: 'Ex-dividend' | 'Dividend pay' | 'Coupon' | 'Maturity'
+  name: string
+  detail: string
+}
+
+/** Flag a single non-bond holding above this share of net worth. */
+export const CONCENTRATION_HOLDING_PCT = 20
+/** Flag a single asset class above this share of net worth. */
+export const CONCENTRATION_CLASS_PCT = 60
+/** Look-ahead for dividend dates and coupons. */
+export const UPCOMING_DAYS = 14
+/** Look-ahead for bond maturities (reinvestment needs more lead time). */
+export const MATURITY_DAYS = 90
+
+const emptyAggInput = (fxToIdr: Map<string, number>): AggregateInput => ({
+  positions: [], snapshots: [], goldPurchases: [], goldPrices: [],
+  bonds: [], bondPayments: [], fundPurchases: [], fundNavs: [],
+  fxToIdr, stockDividends: [], fundDistributions: [], accountCharges: [],
+})
+
+function groupBy<T>(rows: T[], key: (r: T) => string): Map<string, T[]> {
+  const out = new Map<string, T[]>()
+  for (const r of rows) {
+    const k = key(r)
+    const arr = out.get(k)
+    if (arr) arr.push(r)
+    else out.set(k, [r])
+  }
+  return out
+}
+
+const num = (n: number | null): string =>
+  (n == null ? 'N/A' : n.toLocaleString('id-ID', { maximumFractionDigits: 4 }))
+const share = (part: number, whole: number): number | null => (whole > 0 ? (part / whole) * 100 : null)
+const pct1 = (n: number | null): string => (n == null ? 'N/A' : `${n.toFixed(1)}%`)
+
+/** WIB calendar day of a date column (passed through) or a timestamptz (converted). */
+export function wibDay(at: string): string {
+  return at.length === 10 ? at : new Date(at).toLocaleDateString('en-CA', { timeZone: WIB })
+}
+
+/**
+ * Market value per holding. Each value comes from `aggregatePortfolio` run on
+ * that holding's rows alone, so gold/fund netting and fx stay in one place.
+ */
+export function holdingValues(
+  input: AggregateInput,
+  opts: { fundNames?: Map<string, string>; bonds?: Array<{ series_code: string; principal: number }> } = {},
+): HoldingValue[] {
+  const base = emptyAggInput(input.fxToIdr)
+  const out: HoldingValue[] = []
+  for (const p of input.positions) {
+    if (!p.lots || p.lots <= 0) continue
+    const value = aggregatePortfolio({ ...base, positions: [p], snapshots: input.snapshots }).stockValue
+    out.push({ kind: 'Stock', name: displayTicker(p.ticker), value })
+  }
+  for (const [venue, rows] of groupBy(input.goldPurchases, g => g.venue)) {
+    const value = aggregatePortfolio({ ...base, goldPurchases: rows, goldPrices: input.goldPrices }).goldValue
+    if (value > 0) out.push({ kind: 'Gold', name: venue, value })
+  }
+  for (const [code, rows] of groupBy(input.fundPurchases, f => f.fund_code)) {
+    const value = aggregatePortfolio({ ...base, fundPurchases: rows, fundNavs: input.fundNavs }).fundValue
+    if (value > 0) out.push({ kind: 'Fund', name: opts.fundNames?.get(code) ?? code, value })
+  }
+  for (const b of opts.bonds ?? []) {
+    if (b.principal > 0) out.push({ kind: 'Bond', name: b.series_code, value: b.principal })
+  }
+  return out.sort((a, b) => b.value - a.value)
+}
+
+/** Share of net worth per asset class, keyed lower-case (stocks/gold/bonds/funds). */
+export function allocationPct(current: PortfolioAggregate): Record<string, number | null> {
+  return Object.fromEntries(current.products.map(p => [p.name.toLowerCase(), share(p.value, current.netWorth)]))
+}
+
+export function buildAllocationSection(current: PortfolioAggregate, holdings: HoldingValue[]): string {
+  const nw = current.netWorth
+  const lines = [
+    '## Allocation & Concentration',
+    '',
+    '| Asset Class | Value | Share |',
+    '|---|---:|---:|',
+    ...current.products.map(p => `| ${p.name} | ${idr(p.value)} | ${pct1(share(p.value, nw))} |`),
+    '',
+  ]
+  if (holdings.length > 0) {
+    lines.push('**Largest holdings**', '', '| Holding | Class | Value | Share |', '|---|---|---:|---:|')
+    for (const h of holdings.slice(0, 5)) {
+      lines.push(`| ${h.name} | ${h.kind} | ${idr(h.value)} | ${pct1(share(h.value, nw))} |`)
+    }
+    lines.push('')
+  }
+  const warnings = [
+    ...current.products
+      .filter(p => (share(p.value, nw) ?? 0) > CONCENTRATION_CLASS_PCT)
+      .map(p => `${p.name} is ${pct1(share(p.value, nw))} of net worth (above ${CONCENTRATION_CLASS_PCT}%).`),
+    // Bonds are sovereign series (SR/ORI/SBR/ST): one large series is not single-issuer risk.
+    ...holdings
+      .filter(h => h.kind !== 'Bond' && (share(h.value, nw) ?? 0) > CONCENTRATION_HOLDING_PCT)
+      .map(h => `${h.name} (${h.kind}) is ${pct1(share(h.value, nw))} of net worth (above ${CONCENTRATION_HOLDING_PCT}%).`),
+  ]
+  if (warnings.length > 0) lines.push(...warnings.map(w => `- ⚠️ ${w}`), '')
+  return lines.join('\n')
+}
+
+/** Trades, income and fees whose WIB day falls in (weekStart, weekEnd]. */
+export function collectWeekActivity(src: {
+  transactions: StockTransactionRow[]
+  goldPurchases: GoldPurchaseRow[]
+  fundPurchases: FundPurchaseRow[]
+  fxToIdr: Map<string, number>
+  stockDividends: StockDividendRow[]
+  fundDistributions: FundDistributionRow[]
+  couponPayments: Array<{ bond_holding_id: number; paid_at: string; amount: number | null }>
+  bonds: BondHoldingRow[]
+  accountCharges: AccountChargeRow[]
+}, weekStart: string, weekEnd: string): WeekActivity {
+  const inWeek = (at: string): boolean => {
+    const d = wibDay(at)
+    return d > weekStart && d <= weekEnd
+  }
+  const fundName = new Map(src.fundPurchases.map(f => [f.fund_code, f.fund_name ?? f.fund_code]))
+  const bondName = new Map(src.bonds.map(b => [b.id, b.series_code]))
+  const toIdr = (currency: string | undefined, amount: number): number | null => {
+    if (!currency || currency === 'IDR') return amount
+    const fx = src.fxToIdr.get(currency)
+    return fx == null ? null : amount * fx
+  }
+
+  const trades: ActivityRow[] = [
+    ...src.transactions.filter(t => inWeek(t.txn_at)).map(t => ({
+      date: wibDay(t.txn_at), kind: 'Stock', name: displayTicker(t.ticker), side: t.side,
+      detail: `${t.lots} lots @ ${num(t.price)}${t.fee ? ` + fee ${num(t.fee)}` : ''}`,
+      amount: t.lots * 100 * t.price,
+    })),
+    ...src.goldPurchases.filter(g => inWeek(g.purchased_at)).map(g => ({
+      date: wibDay(g.purchased_at), kind: 'Gold', name: g.venue, side: g.side ?? 'BUY',
+      detail: `${num(g.grams)} g @ ${num(g.buy_price_per_gram)}`,
+      amount: g.grams * g.buy_price_per_gram,
+    })),
+    ...src.fundPurchases.filter(f => inWeek(f.purchased_at)).map(f => ({
+      date: wibDay(f.purchased_at), kind: 'Fund', name: f.fund_name ?? f.fund_code, side: f.side ?? 'BUY',
+      detail: `${num(f.units)} units @ ${num(f.buy_nav_per_unit)} ${f.currency ?? 'IDR'}`,
+      amount: toIdr(f.currency, f.units * f.buy_nav_per_unit),
+    })),
+  ]
+  const income: ActivityRow[] = [
+    ...src.stockDividends.filter(d => inWeek(d.paid_at)).map(d => ({
+      date: wibDay(d.paid_at), kind: 'Dividend', name: displayTicker(d.ticker), detail: d.notes ?? '', amount: d.amount,
+    })),
+    ...src.fundDistributions.filter(d => inWeek(d.paid_at)).map(d => ({
+      date: wibDay(d.paid_at), kind: 'Distribution', name: fundName.get(d.fund_code) ?? d.fund_code, detail: d.notes ?? '', amount: d.amount,
+    })),
+    ...src.couponPayments.filter(c => inWeek(c.paid_at)).map(c => ({
+      date: wibDay(c.paid_at), kind: 'Coupon', name: bondName.get(c.bond_holding_id) ?? `bond #${c.bond_holding_id}`, detail: '', amount: c.amount,
+    })),
+  ]
+  const fees: ActivityRow[] = src.accountCharges.filter(c => inWeek(c.charged_at)).map(c => ({
+    date: wibDay(c.charged_at), kind: c.type, name: '', detail: c.notes ?? '', amount: c.amount,
+  }))
+  const byDate = (a: ActivityRow, b: ActivityRow) => a.date.localeCompare(b.date)
+  return { trades: trades.sort(byDate), income: income.sort(byDate), fees: fees.sort(byDate) }
+}
+
+export function activityTotals(a: WeekActivity): { bought: number; sold: number; income: number; fees: number } {
+  const sum = (rows: ActivityRow[]) => rows.reduce((acc, r) => acc + (r.amount ?? 0), 0)
+  return {
+    bought: sum(a.trades.filter(t => t.side === 'BUY')),
+    sold: sum(a.trades.filter(t => t.side === 'SELL')),
+    income: sum(a.income),
+    fees: sum(a.fees),
+  }
+}
+
+export function buildActivitySection(a: WeekActivity, failed = false): string {
+  const lines = ['## Activity This Week', '']
+  if (failed) {
+    lines.push('_⚠️ Activity unavailable — the fetch failed. Treat this as missing data, not a quiet week._', '')
+    return lines.join('\n')
+  }
+  if (a.trades.length + a.income.length + a.fees.length === 0) {
+    lines.push('_No trades, income or fees recorded this week._', '')
+    return lines.join('\n')
+  }
+  const t = activityTotals(a)
+  if (a.trades.length > 0) {
+    lines.push('### Trades', '', '| Date | Asset | Name | Side | Detail | Amount |', '|---|---|---|---|---|---:|')
+    for (const r of a.trades) lines.push(`| ${r.date} | ${r.kind} | ${r.name} | ${r.side} | ${r.detail} | ${idr(r.amount)} |`)
+    lines.push('', `Bought ${idr(t.bought)} · Sold ${idr(t.sold)} · Net ${idr(t.bought - t.sold)} added.`, '')
+  }
+  if (a.income.length > 0) {
+    lines.push('### Income Received', '', '| Date | Type | From | Amount |', '|---|---|---|---:|')
+    for (const r of a.income) lines.push(`| ${r.date} | ${r.kind} | ${r.name} | ${idr(r.amount)} |`)
+    lines.push('', `Total income: ${idr(t.income)}.`, '')
+  }
+  if (a.fees.length > 0) {
+    lines.push('### Fees', '', '| Date | Type | Notes | Amount |', '|---|---|---|---:|')
+    for (const r of a.fees) lines.push(`| ${r.date} | ${r.kind} | ${r.detail || '—'} | ${idr(r.amount)} |`)
+    lines.push('', `Total fees: ${idr(t.fees)}.`, '')
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Dividend ex/pay dates for held tickers and bond coupons in [from, to], plus
+ * bond maturities in [from, maturityTo].
+ */
+export function collectUpcoming(src: {
+  schedule: DividendScheduleRow[]
+  positions: Array<{ ticker: string; lots: number | null }>
+  bonds: BondHoldingRow[]
+  couponDates: Array<{ bond_holding_id: number; distribution_date: string }>
+  couponPayments: Array<{ bond_holding_id: number; paid_at: string; amount: number | null }>
+}, from: string, to: string, maturityTo: string): UpcomingEvent[] {
+  const inRange = (d: string | null, end = to): d is string => d != null && d >= from && d <= end
+  const shares = new Map(src.positions.filter(p => (p.lots ?? 0) > 0).map(p => [p.ticker.toUpperCase(), (p.lots ?? 0) * 100]))
+  const events: UpcomingEvent[] = []
+
+  for (const s of src.schedule) {
+    const held = shares.get(s.ticker.toUpperCase())
+    if (held == null) continue
+    const per = s.amount_per_share
+    const isIdr = !s.currency || s.currency === 'IDR'
+    const detail = per == null
+      ? 'amount not announced'
+      : `${isIdr ? 'Rp' : s.currency} ${num(per)}/share${s.amount_estimated ? ' (est.)' : ''}` +
+        (isIdr ? ` · ≈ ${fmtIdr(per * held)} on ${held.toLocaleString('id-ID')} shares` : '')
+    const name = displayTicker(s.ticker)
+    if (inRange(s.ex_date)) events.push({ date: s.ex_date, event: 'Ex-dividend', name, detail: `${detail} — hold through cum-date ${s.cum_date ?? 'N/A'}` })
+    if (inRange(s.pay_date)) events.push({ date: s.pay_date, event: 'Dividend pay', name, detail })
+  }
+
+  const datesByBond = groupBy(src.couponDates, c => String(c.bond_holding_id))
+  const lastPaid = latestPaymentByHolding(src.couponPayments)
+  for (const b of src.bonds) {
+    if (b.id == null) continue
+    const dates = (datesByBond.get(String(b.id)) ?? []).map(c => c.distribution_date)
+    const est = lastPaid.get(b.id)
+      ?? (b.coupon_rate != null ? estimateCouponNet(b.principal, b.coupon_rate, inferPaymentsPerYear(dates)) : null)
+    for (const d of dates) {
+      if (inRange(d)) events.push({ date: d, event: 'Coupon', name: b.series_code, detail: est == null ? 'amount unknown' : `≈ ${fmtIdr(est)} net` })
+    }
+    if (inRange(b.maturity_date, maturityTo)) {
+      events.push({ date: b.maturity_date, event: 'Maturity', name: b.series_code, detail: `${fmtIdr(b.principal)} principal returns — plan reinvestment` })
+    }
+  }
+  return events.sort((a, b) => a.date.localeCompare(b.date) || a.name.localeCompare(b.name))
+}
+
+export function buildUpcomingSection(events: UpcomingEvent[], failed = false): string {
+  const lines = ['## Coming Up', '']
+  if (failed) {
+    lines.push('_⚠️ Upcoming events unavailable — the fetch failed._', '')
+  } else if (events.length === 0) {
+    lines.push(`_No dividend dates or coupons in the next ${UPCOMING_DAYS} days, and no bond maturities in the next ${MATURITY_DAYS} days._`, '')
+  } else {
+    lines.push('| Date | Event | Holding | Detail |', '|---|---|---|---|')
+    for (const e of events) lines.push(`| ${e.date} | ${e.event} | ${e.name} | ${e.detail} |`)
+    lines.push('', `_Dividends and coupons: next ${UPCOMING_DAYS} days. Maturities: next ${MATURITY_DAYS} days._`, '')
+  }
+  return lines.join('\n')
+}
+
 export function buildHandoverDoc(args: {
   weekStart: string
   weekEnd: string
   model: string
   numbersSection: string
+  /** Allocation, activity and coming-up sections; optional so the stock-only shape still builds. */
+  portfolioSections?: string[]
   ledgerSection: string
   newsSection: string
   accuracy: RecommendationAccuracyRow[]
@@ -232,12 +545,15 @@ export function buildHandoverDoc(args: {
     `# Folionix Analysis Handover — week ${args.weekStart} → ${args.weekEnd}`,
     '',
     '> **Instructions for the reviewing LLM:** You are auditing a small self-hosted',
-    '> stock-analysis system that runs a local model with limited context. Using the',
-    '> raw data below, assess the quality of last week\'s recommendations and propose',
-    '> concrete improvements: (1) additional data sources worth ingesting, (2) specific',
-    '> prompt changes (structure, framing, output format), (3) recommendation-policy',
-    '> fixes (thresholds, dedup, timing). Be specific and actionable; assume changes',
-    '> must run on a local LLM with ~4k output tokens.',
+    '> portfolio-analysis system (IDX stocks, gold, mutual funds, government bonds) that',
+    '> runs a local model with limited context. Only stocks get LLM recommendations; gold,',
+    '> funds and bonds are tracked and valued. Using the raw data below, assess the quality',
+    '> of last week\'s recommendations and the portfolio as a whole, and propose concrete',
+    '> improvements: (1) additional data sources worth ingesting, (2) specific prompt',
+    '> changes (structure, framing, output format), (3) recommendation-policy fixes',
+    '> (thresholds, dedup, timing), (4) portfolio-level gaps (allocation, concentration,',
+    '> income, upcoming cash events) the system should surface. Be specific and actionable;',
+    '> assume changes must run on a local LLM with ~4k output tokens.',
     '',
     '## System description',
     '',
@@ -245,10 +561,12 @@ export function buildHandoverDoc(args: {
     '- Per-ticker prompt contains: IDX market-session label (WIB), price block (current, day change, volume, 52w range), investor position (lots, avg price, P&L) for held stocks, fundamentals (P/E, P/B, dividend yield, market cap) on FULL/DEEP depth, a TECHNICALS block computed from snapshot history (SMA20/50, RSI14, 1W momentum, volume vs 20d avg, IHSG relative strength), optional news-sentiment summary (RSS headlines summarized by the same LLM), and a required Telegram-HTML output template ending in a mandatory `REKOMENDASI: <keyword>` line.',
     '- Held positions get action sizing vs a Rp 1,000,000 materiality threshold but must still state a market view; watchlist tickers are asked for a pure entry signal (BUY / MONITOR / HOLD) with no threshold.',
     '- Recommendation extracted from the REKOMENDASI line (fallback: keyword scan): AVERAGE DOWN, TAKE PROFIT, CUT LOSS, HOLD, MONITOR, BUY, TRIM.',
-    '- Data sources today: yahoo-finance2 (prices + fundamentals), Google News RSS (sentiment), own snapshot history (technicals), Finnhub (optional fallback, USD). No broker flow, no order-book data, no sector benchmarks.',
+    '- Data sources today: yahoo-finance2 (prices + fundamentals), Google News RSS (sentiment), own snapshot history (technicals), IDX-IC peer groups (sector-relative valuation), Finnhub (optional fallback, USD). No broker flow, no order-book data.',
+    '- Non-stock assets: gold valued at the venue sell-back price (Cermati), mutual funds at latest NAV (Cermati, fx-converted), bonds at par. Income (dividends, fund distributions, coupons) is tracked separately from capital; Total Return = Capital + Income − Fees.',
     '- Accuracy scoring: one rec per ticker per WIB day (the last); BUY-ish correct when price rises after N days, SELL-ish when it falls. HOLD-ish is scored against IHSG — correct when the ticker tracked the index within 1.5pp over the window, since a HOLD is a decision to do nothing and the question is whether doing nothing cost anything. Absolute |move| < 5% is the fallback only when no IHSG snapshot brackets the window.',
     '',
     args.numbersSection,
+    ...(args.portfolioSections ?? []),
     args.ledgerSection,
     args.newsSection,
     '## Full accuracy sample (last scored recommendations)',
@@ -266,28 +584,24 @@ export function buildHandoverDoc(args: {
     '1. Top 3 weaknesses observed in the recommendations vs actual outcomes.',
     '2. Data sources to add, ranked by expected impact vs integration effort.',
     '3. A revised prompt template (drop-in replacement) tuned for a small local model.',
+    '4. Portfolio-level observations: allocation drift, concentration, income cadence, and what the weekly review should track that it does not.',
     '',
   ].join('\n')
 }
 
 // ── LLM SELF-CRITIQUE ───────────────────────────────────────────────────────
 
-async function buildSelfCritique(
-  numbersSection: string,
-  ledgerSection: string,
-  newsSection: string,
-): Promise<string> {
-  const system = 'You are reviewing the weekly output of an automated IDX stock-analysis system. Be candid and concrete.'
+async function buildSelfCritique(sections: string[]): Promise<string> {
+  const system = 'You are reviewing the weekly output of an automated portfolio system covering IDX stocks, gold, mutual funds and Indonesian government bonds. Be candid and concrete.'
   const prompt = [
-    'Below are this week\'s portfolio numbers, the recommendations the system issued with outcomes, and the news sentiment the system fed into those recommendations.',
+    'Below are this week\'s portfolio numbers, allocation, trades/income/fees, upcoming dividend and bond events, the stock recommendations the system issued with outcomes, and the news sentiment fed into those recommendations.',
     '',
-    numbersSection,
-    ledgerSection,
-    newsSection,
-    'Write a short self-review in plain markdown (max 200 words):',
+    ...sections,
+    'Write a short self-review in plain markdown (max 250 words):',
     '1. What the recommendations got right or wrong this week (cite tickers), and whether news sentiment aligned with outcomes — call out tickers where they diverged.',
-    '2. One pattern to watch next week.',
-    '3. One concrete improvement to the analysis system (data or prompt).',
+    '2. The portfolio as a whole: how stocks, gold, funds and bonds each moved, any concentration warning, and whether this week\'s trades moved allocation toward or away from balance.',
+    '3. One thing to act on or watch next week (cite an upcoming event if relevant).',
+    '4. One concrete improvement to the analysis system (data or prompt).',
     'No preamble, no HTML.',
   ].join('\n')
   try {
@@ -325,10 +639,13 @@ export async function runWeekReview(opts?: { send?: boolean }): Promise<WeekRevi
     stockDividends, fundDistributions, accountCharges,
   }
   const current = aggregatePortfolio(baseInput)
+  const fundNames = new Map(fundPurchases.map(f => [f.fund_code, f.fund_name ?? f.fund_code]))
+  const holdings = holdingValues(baseInput, { fundNames, bonds })
 
   // ── Week-ago aggregate: same holdings, week-ago prices ──
   let weekAgoAgg: PortfolioAggregate | null = null
   const stockChanges: StockWeekChange[] = []
+  const assetMoves: AssetMove[] = []
   try {
     // Week-ago lookups are independent per ticker/venue/fund — fetch them
     // concurrently instead of one serial round-trip each.
@@ -355,6 +672,15 @@ export async function runWeekReview(opts?: { send?: boolean }): Promise<WeekRevi
       [...new Set(fundPurchases.map(f => f.fund_code))].map(async (code) =>
         ({ fund_code: code, nav: await getFundNavBefore(code, weekAgoDate) })),
     )
+    for (const { venue, sell_price } of oldGoldPrices) {
+      const now = goldPrices.find(g => g.venue === venue)?.sell_price ?? null
+      assetMoves.push({ kind: 'Gold', name: venue, unit: 'IDR/g', now, weekAgo: sell_price })
+    }
+    for (const { fund_code, nav } of oldNavs) {
+      const now = fundNavs.find(n => n.fund_code === fund_code)?.nav ?? null
+      const currency = fundPurchases.find(f => f.fund_code === fund_code)?.currency ?? 'IDR'
+      assetMoves.push({ kind: 'Fund', name: fundNames.get(fund_code) ?? fund_code, unit: `${currency}/unit`, now, weekAgo: nav })
+    }
     weekAgoAgg = aggregatePortfolio({
       ...baseInput,
       snapshots: oldSnaps,
@@ -420,17 +746,53 @@ export async function runWeekReview(opts?: { send?: boolean }): Promise<WeekRevi
     console.error('[weekReview] sentiment fetch failed:', err instanceof Error ? err.message : err)
   }
 
+  // ── Trades, income and fees during the week ──
+  let activity: WeekActivity = { trades: [], income: [], fees: [] }
+  let activityFailed = false
+  let couponPayments: Array<{ bond_holding_id: number; paid_at: string; amount: number | null }> = []
+  try {
+    const [transactions, payments] = await Promise.all([getStockTransactions(), getBondCouponPaymentRows()])
+    couponPayments = payments
+    activity = collectWeekActivity({
+      transactions, goldPurchases, fundPurchases, fxToIdr, stockDividends, fundDistributions,
+      couponPayments, bonds, accountCharges,
+    }, weekStart, weekEnd)
+  } catch (err) {
+    activityFailed = true
+    console.error('[weekReview] activity fetch failed:', err instanceof Error ? err.message : err)
+  }
+
+  // ── Dividend dates, coupons and maturities ahead ──
+  let upcoming: UpcomingEvent[] = []
+  let upcomingFailed = false
+  try {
+    const [schedule, couponDates] = await Promise.all([
+      getDividendScheduleBetween(weekEnd, wibDateOffset(UPCOMING_DAYS)), getBondCouponScheduleDates(),
+    ])
+    upcoming = collectUpcoming({ schedule, positions, bonds, couponDates, couponPayments },
+      weekEnd, wibDateOffset(UPCOMING_DAYS), wibDateOffset(MATURITY_DAYS))
+  } catch (err) {
+    upcomingFailed = true
+    console.error('[weekReview] upcoming fetch failed:', err instanceof Error ? err.message : err)
+  }
+
   // ── Assemble sections ──
-  const numbersSection = buildNumbersSection(current, weekAgoAgg, stockChanges)
+  const numbersSection = buildNumbersSection(current, weekAgoAgg, stockChanges, assetMoves)
+  const portfolioSections = [
+    buildAllocationSection(current, holdings),
+    buildActivitySection(activity, activityFailed),
+    buildUpcomingSection(upcoming, upcomingFailed),
+  ]
   const ledgerSection = buildLedgerSection(ledger, accuracy, failures)
   const newsSection = buildNewsSection(sentiments)
-  const critiqueSection = await buildSelfCritique(numbersSection, ledgerSection, newsSection)
+  const critiqueSection = await buildSelfCritique([numbersSection, ...portfolioSections, ledgerSection, newsSection])
 
   const model = process.env.LLM_MODEL ?? process.env.OLLAMA_MODEL ?? 'unknown'
   const reportMd = [
     `# Folionix Week Review — ${weekStart} → ${weekEnd}`,
     '',
     numbersSection,
+    ...portfolioSections,
     ledgerSection,
     newsSection,
     critiqueSection,
@@ -439,12 +801,15 @@ export async function runWeekReview(opts?: { send?: boolean }): Promise<WeekRevi
   const lastWithOutput = [...weekAnalyses].reverse().find(a => a.raw_output)
   const handoverMd = buildHandoverDoc({
     weekStart, weekEnd, model,
-    numbersSection, ledgerSection, newsSection, accuracy,
+    numbersSection, portfolioSections, ledgerSection, newsSection, accuracy,
     sampleRawOutput: lastWithOutput?.raw_output ?? null,
     failures,
   })
 
   const scored = accuracy.filter(a => a.correct != null)
+  const totals = activityTotals(activity)
+  const alloc = allocationPct(current)
+  const top = holdings[0]
   const stats: WeekReviewStats = {
     net_worth: current.netWorth,
     net_worth_week_ago: weekAgoAgg?.netWorth ?? null,
@@ -457,6 +822,12 @@ export async function runWeekReview(opts?: { send?: boolean }): Promise<WeekRevi
     rec_changed: ledger.length,
     accuracy_pct: scored.length > 0 ? (scored.filter(a => a.correct).length / scored.length) * 100 : null,
     accuracy_n: scored.length,
+    alloc_pct: alloc,
+    top_holding: top ? { name: top.name, kind: top.kind, pct: current.netWorth > 0 ? (top.value / current.netWorth) * 100 : null } : null,
+    income_week: activityFailed ? null : totals.income,
+    fees_week: activityFailed ? null : totals.fees,
+    net_bought_week: activityFailed ? null : totals.bought - totals.sold,
+    upcoming_events: upcomingFailed ? null : upcoming.length,
   }
 
   const id = await saveWeeklyReview({
@@ -474,6 +845,9 @@ export async function runWeekReview(opts?: { send?: boolean }): Promise<WeekRevi
       await sendTelegram(
         `<b>📊 Week Review ${weekStart} → ${weekEnd}</b>\n` +
         `Net Worth: <code>${fmtIdr(current.netWorth)}</code> (${wowStr} WoW)\n` +
+        `Mix: ${current.products.map(p => `${p.name} ${pct1(alloc[p.name.toLowerCase()] ?? null)}`).join(' · ')}\n` +
+        (activityFailed ? '' : `Income ${fmtIdr(totals.income)} · Fees ${fmtIdr(totals.fees)} this week\n`) +
+        (upcoming.length > 0 ? `Coming up: ${upcoming.length} dividend/bond event${upcoming.length === 1 ? '' : 's'}\n` : '') +
         `Recommendations: ${failures.ledger ? 'unavailable (fetch failed)' : `${stats.rec_changed} new`}, accuracy ${failures.accuracy ? 'unavailable' : accStr}\n` +
         `Full report + handover doc on the dashboard → /reviews`,
       )

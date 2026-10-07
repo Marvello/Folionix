@@ -8,6 +8,14 @@ description: Dated record of OKF concept drift fixes and sync passes.
 Append-only. Newest entries first. Each entry records what drifted in the
 codebase and which concept(s) were updated to match.
 
+## 2026-10-07 — Week review covers the whole portfolio
+
+`weekReview.ts` gained allocation/concentration, gold & fund per-unit week
+moves, the week's activity (trades, income, fees), and a coming-up section
+(dividend dates, coupons, maturities); the self-critique and handover prompts
+now review the whole portfolio. New getter `getDividendScheduleBetween`.
+Updated: [week review](pipelines/week-review.md).
+
 ## 2026-09-07 — Stock detail: key stats, financials, corporate actions
 
 - **Added** `stock_key_stats`, `stock_financials` and `corporate_actions`

@@ -593,6 +593,16 @@ export async function getDividendScheduleForExDate(date: string): Promise<Divide
   return rows
 }
 
+/** Schedule rows whose ex-date or pay-date falls in [from, to] (YYYY-MM-DD, inclusive). */
+export async function getDividendScheduleBetween(from: string, to: string): Promise<DividendScheduleRow[]> {
+  const { rows } = await q(
+    `SELECT * FROM dividend_schedule
+     WHERE ex_date BETWEEN $1 AND $2 OR pay_date BETWEEN $1 AND $2`,
+    [from, to],
+  )
+  return rows
+}
+
 export async function getDividendScheduleForPayDate(date: string): Promise<DividendScheduleRow[]> {
   const { rows } = await q(`SELECT * FROM dividend_schedule WHERE pay_date = $1`, [date])
   return rows

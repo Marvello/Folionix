@@ -1,3 +1,39 @@
+# Feature: end-to-end weekly review (all asset classes) — branch `feat/weekreview-e2e`
+
+Today `runWeekReview` already prices every asset class in its totals (`lib/aggregate`), but
+everything below the totals is about stocks: per-ticker week changes, the recommendation ledger,
+news, and an AI self-review prompt that only covers stocks. Gold, funds, bonds, income, fees and
+trades show up only as single lines in the product table.
+
+## Plan (pure builders in `weekReview.ts`, each unit-tested; no migration)
+- [x] R1 **Allocation & concentration**: % of net worth per asset class; top-5 single holdings
+      (stock ticker / gold venue / fund / bond series) as % of net worth; ⚠️ flag when one holding is above 20% or one class above 60%.
+      Values per gold venue and per fund come from calling `aggregatePortfolio` on just those rows, so there's no second copy of the valuation math.
+- [x] R2 **Non-stock week moves**: gold sell price per venue and fund NAV per fund, now vs a week ago
+      (both already fetched for the week-ago aggregate, just never shown).
+- [x] R3 **Activity this week**: stock BUY/SELL fills, gold and fund buys/sells, income received (dividends,
+      fund distributions, bond coupons, each by its `paid_at`), fees (`charged_at`). Each line has an IDR total.
+      This also gives context for the existing "buys/sells are not backed out" caveat.
+- [x] R4 **Coming up (next 14 days)**: dividend ex/pay dates for held tickers, bond coupon dates,
+      bond maturities within 90 days. Needs one new getter: `getDividendScheduleBetween(from, to)`.
+- [x] R5 AI self-review and handover: feed them the new sections and widen the prompt from
+      "stock-analysis system" to the whole portfolio (allocation drift, income, idle cash events).
+- [x] R6 `stats` jsonb: add `alloc_pct` {stocks,gold,funds,bonds}, `income_week`, `fees_week`, `top_holding_pct`.
+      Telegram ping: add one allocation line.
+- [x] R7 Docs: CLAUDE.md weekReview bullet, `knowledge/pipelines/week-review.md`, log.md.
+- [x] R8 Verify: `npm test` + `npm run typecheck` + `npm run build` in app/; render a sample report from
+      fixture data (no prod DB access from here) and paste it into the review section below.
+
+### Review (2026-10-07)
+- `app`: 364 tests pass (27 in weekReview, 15 new), typecheck clean, build ok. No migration; one new read getter.
+- Sample render (fixture data — prod DB not reachable from the laptop) checked by eye; it found two issues, both fixed:
+  numbers mixed `Rp 2.050.000` with `2,050,000` (now id-ID throughout), and a sovereign bond series got a concentration ⚠️ (bonds are now excluded from the single-holding flag).
+- Not verified: an LLM self-critique on real data, and the email/Telegram send. Both will run at the first Saturday run after deploy,
+  or run `npm run weekreview -- --no-send` in the cluster and check /reviews.
+
+Out of scope (say so if wanted): new web UI (the /reviews page already renders the markdown), and
+a true time-weighted return that backs out mid-week cash flows.
+
 # Feature: sector-aware peer valuation (B1 + B2) — branch `feat/peer-valuation`
 
 Decisions (user, 2026-10-06): peers come from the official IDX-IC classification
