@@ -96,7 +96,7 @@ npm run prices -- BBCA TLKM   # specific tickers
 # Watchlist analysis
 npm run watchlist
 
-# Weekly review (portfolio WoW + AI self-review + handover doc; --no-send skips email/Telegram)
+# Weekly review (all-asset WoW, allocation, activity, upcoming events, AI self-review + handover doc; --no-send skips email/Telegram)
 npm run weekreview
 npm run weekreview -- --no-send
 
@@ -153,7 +153,7 @@ app/src/services/gold.ts       →  cermati GraphQL → gold_snapshots
 app/src/services/funds.ts      →  cermati NAV REST → fund_catalog + fund_snapshots
 app/src/services/bonds.ts      →  par value (no provider; principal entered manually, web-only)
 app/src/services/fundamentals.ts → yahoo quoteSummary + chart → stock_key_stats + stock_financials + corporate_actions
-app/src/services/weekReview.ts →  weekly review (lib/aggregate WoW + rec ledger + LLM self-critique) → weekly_reviews + email + Telegram
+app/src/services/weekReview.ts →  weekly review (lib/aggregate WoW + allocation + activity + coming up + rec ledger + LLM self-critique) → weekly_reviews + email + Telegram
 app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue → persona LLM calls → consensus → llm_analyses + Telegram)
        ↓ (saves)
      app/src/db/db.ts  ←→  Postgres (node-postgres pool, raw SQL) via DATABASE_URL
@@ -179,7 +179,7 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 - **app/src/services/gold.ts**: `refreshGoldPrices` (cermati GraphQL → gold_snapshots), `listGoldHoldings` (valued at venue sell-back price). Re-exports `addGoldPurchase`/`deactivateGoldPurchase`.
 - **app/src/services/funds.ts**: `refreshFundNavs` (cermati REST sweep → fund_catalog + fund_snapshots), `listFundHoldings` (valued at latest NAV via `latest_fund_navs` view). Mutations are web-only.
 - **app/src/services/bonds.ts**: `listBondHoldings` (valued at par, days to maturity computed), `syncBondCouponSchedules` (KSEI HTML scrape for SR/ORI/SBR/ST series), `recordCouponPayment`. Mutations are web-only.
-- **app/src/services/weekReview.ts**: `runWeekReview` — weekly retrospective (all assets WoW via shared `lib/aggregate.ts`, recommendation ledger + `recommendation_accuracy` RPC, local-LLM self-critique, external-LLM handover doc) saved to `weekly_reviews`, emailed via Brevo (`services/email.ts`) and pinged to Telegram. Scheduled Saturday ≥ 09:00 WIB by the graph runner; manual via `/weekreview` bot command or `npm run weekreview`.
+- **app/src/services/weekReview.ts**: `runWeekReview` — weekly retrospective (all assets WoW via shared `lib/aggregate.ts` incl. gold price / fund NAV per-unit moves; allocation & concentration — class share of net worth, top-5 holdings, ⚠️ above 60% class / 20% single non-bond holding, per-holding values via `aggregatePortfolio` on that holding's rows; activity — trades, income received, fees by WIB day in (weekStart, weekEnd]; coming up — held-ticker dividend ex/pay dates + bond coupons in 14 days, maturities in 90; recommendation ledger + `recommendation_accuracy` RPC, local-LLM self-critique, external-LLM handover doc) saved to `weekly_reviews`, emailed via Brevo (`services/email.ts`) and pinged to Telegram. Scheduled Saturday ≥ 09:00 WIB by the graph runner; manual via `/weekreview` bot command or `npm run weekreview`.
 - **lib/aggregate.ts**: `aggregatePortfolio` — pure portfolio-wide aggregation (net worth, capital, income, fees, total return, per-product summary) shared by the web dashboard and the week review. Root `lib/` is the `@folionix/lib` workspace package; web imports it directly (`import { aggregatePortfolio } from "@folionix/lib"`).
 
 ## Key Configuration
