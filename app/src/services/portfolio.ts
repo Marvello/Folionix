@@ -28,6 +28,8 @@ const NO_TELEGRAM = process.argv.includes('--no-telegram') || !SEND_TELEGRAM
 // and trip their rate limits.
 const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROVIDER_CONCURRENCY) || 4)
 
+const BENCHMARK = '^JKSE'
+
 export async function runPriceRefresh(rawTickers?: string[]): Promise<void> {
   // Keys are yahoo symbols; accept plain codes too (CLI: `npm run prices -- BBCA`).
   const tickers = rawTickers?.map(normalizeTicker)
@@ -45,6 +47,11 @@ export async function runPriceRefresh(rawTickers?: string[]): Promise<void> {
     if (!tickers || tickers.includes(w.ticker)) {
       allTickers.push({ ticker: w.ticker, avgPrice: 0, lots: 0, notes: w.notes })
     }
+  }
+  // IHSG is the benchmark for recommendation accuracy and the technicals'
+  // relative strength; neither works unless ^JKSE has snapshots of its own.
+  if (!tickers && !allTickers.some(t => t.ticker === BENCHMARK)) {
+    allTickers.push({ ticker: BENCHMARK, avgPrice: 0, lots: 0, notes: null })
   }
 
   // Concurrency-capped fan-out for price fetches
@@ -191,7 +198,11 @@ export async function runPortfolioPipeline(rawTickers?: string[], depth: Depth =
 }
 
 export async function runWatchlistPipeline(alerts: AlertMode = 'dedup'): Promise<void> {
-  const wl = await getWatchlist()
+  // A held ticker that is also watchlisted would get a watch-only verdict
+  // (MONITOR) between its position verdicts (HOLD/CUT LOSS) — flip-flopping
+  // keywords that defeat alert dedup. The portfolio pipeline owns held tickers.
+  const portfolio = await loadPortfolio()
+  const wl = (await getWatchlist()).filter(w => !(w.ticker in portfolio))
   // Concurrency-capped fan-out for ticker analysis
   const results = await mapPool(wl, FETCH_CONCURRENCY, entry =>
     analyzeOneTicker(entry.ticker, 0, 0, entry.notes, 'LIGHT', alerts).catch((err) => {

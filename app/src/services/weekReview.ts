@@ -227,6 +227,8 @@ export interface HoldingValue {
   kind: 'Stock' | 'Gold' | 'Fund' | 'Bond'
   name: string
   value: number
+  /** Government series (SR/ORI/SBR/ST): no single-issuer risk, so never flagged. */
+  sovereign?: boolean
 }
 
 /** Per-unit price of a non-stock asset now vs a week ago (gold per gram, fund NAV per unit). */
@@ -260,7 +262,7 @@ export interface UpcomingEvent {
   detail: string
 }
 
-/** Flag a single non-bond holding above this share of net worth. */
+/** Flag a single holding (except sovereign bonds) above this share of net worth. */
 export const CONCENTRATION_HOLDING_PCT = 20
 /** Flag a single asset class above this share of net worth. */
 export const CONCENTRATION_CLASS_PCT = 60
@@ -302,7 +304,7 @@ export function wibDay(at: string): string {
  */
 export function holdingValues(
   input: AggregateInput,
-  opts: { fundNames?: Map<string, string>; bonds?: Array<{ series_code: string; principal: number }> } = {},
+  opts: { fundNames?: Map<string, string>; bonds?: Array<{ series_code: string; series_type: string; principal: number }> } = {},
 ): HoldingValue[] {
   const base = emptyAggInput(input.fxToIdr)
   const out: HoldingValue[] = []
@@ -320,7 +322,7 @@ export function holdingValues(
     if (value > 0) out.push({ kind: 'Fund', name: opts.fundNames?.get(code) ?? code, value })
   }
   for (const b of opts.bonds ?? []) {
-    if (b.principal > 0) out.push({ kind: 'Bond', name: b.series_code, value: b.principal })
+    if (b.principal > 0) out.push({ kind: 'Bond', name: b.series_code, value: b.principal, sovereign: b.series_type !== 'CORP' })
   }
   return out.sort((a, b) => b.value - a.value)
 }
@@ -351,9 +353,9 @@ export function buildAllocationSection(current: PortfolioAggregate, holdings: Ho
     ...current.products
       .filter(p => (share(p.value, nw) ?? 0) > CONCENTRATION_CLASS_PCT)
       .map(p => `${p.name} is ${pct1(share(p.value, nw))} of net worth (above ${CONCENTRATION_CLASS_PCT}%).`),
-    // Bonds are sovereign series (SR/ORI/SBR/ST): one large series is not single-issuer risk.
+    // A large sovereign series is not single-issuer risk; a corporate bond is.
     ...holdings
-      .filter(h => h.kind !== 'Bond' && (share(h.value, nw) ?? 0) > CONCENTRATION_HOLDING_PCT)
+      .filter(h => !h.sovereign && (share(h.value, nw) ?? 0) > CONCENTRATION_HOLDING_PCT)
       .map(h => `${h.name} (${h.kind}) is ${pct1(share(h.value, nw))} of net worth (above ${CONCENTRATION_HOLDING_PCT}%).`),
   ]
   if (warnings.length > 0) lines.push(...warnings.map(w => `- ⚠️ ${w}`), '')

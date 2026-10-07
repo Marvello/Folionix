@@ -235,6 +235,9 @@ describe('buildAllocationSection', () => {
     expect(md).toContain('⚠️ Pegadaian (Gold) is 34.9% of net worth')
     expect(md).not.toContain('USDF (Fund) is')
     expect(md).not.toContain('SR018 (Bond) is') // sovereign series: shown, never flagged
+    // the same position as a corporate bond is single-issuer risk → flagged
+    const corp = buildAllocationSection(current, holdingValues(input, { bonds: [bond({ series_code: 'INKP05BCN1', series_type: 'CORP' })] }))
+    expect(corp).toContain('⚠️ INKP05BCN1 (Bond) is 29.1% of net worth')
     expect(md).not.toContain('above 60%')
   })
 

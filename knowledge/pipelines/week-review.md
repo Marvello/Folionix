@@ -26,8 +26,8 @@ failing step degrades its section instead of aborting the review.
    (NAV/unit, in the fund's currency).
 2. **Allocation & concentration** — each asset class as a share of net worth,
    the top-5 single holdings (stock / gold venue / fund / bond series), and ⚠️
-   flags above 60% per class or 20% per non-bond holding (bonds are sovereign
-   series, so one large series is not issuer risk). Per-holding values come from
+   flags above 60% per class or 20% per holding — except sovereign bonds
+   (SR/ORI/SBR/ST: no issuer risk); corporate bonds (`series_type` CORP) are flagged. Per-holding values come from
    running `aggregatePortfolio` on that holding's rows alone — no second copy
    of the netting/fx math.
 3. **Activity** — stock fills ([stock_transactions](../tables/stock-transactions.md)),
