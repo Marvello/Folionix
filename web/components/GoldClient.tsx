@@ -12,8 +12,10 @@ import {
 } from "@/app/actions";
 import { fmtIdr, fmtIdrCompact, fmtNum, fmtSigned, fmtWib, fmtAgo, dirGlyph, tone } from "@/lib/format";
 import type { GoldPurchase, GoldPrice } from "@/lib/types";
+import type { ChartPoint } from "@/lib/chart";
 import { foldWeightedAvg, type LedgerLot } from "@folionix/lib";
 import MetricCard from "@/components/MetricCard";
+import PriceChart from "@/components/PriceChart";
 import EmptyState from "@/components/EmptyState";
 import Modal from "@/components/Modal";
 import Delta from "@/components/Delta";
@@ -42,9 +44,11 @@ type Editing = {
 export default function GoldClient({
   purchases,
   prices,
+  history = {},
 }: {
   purchases: GoldPurchase[];
   prices: GoldPrice[];
+  history?: Record<string, ChartPoint[]>;
 }) {
   const router = useRouter();
   const sellByVenue = new Map(prices.map((p) => [p.venue, p.sell_price]));
@@ -236,6 +240,15 @@ export default function GoldClient({
           ])}
         </div>
       )}
+
+      {venues
+        .filter((v) => (history[v]?.length ?? 0) >= 2)
+        .map((v) => (
+          <div key={v} className="rounded-lg border border-edge bg-component p-4">
+            <h2 className="mb-2 text-sm font-medium capitalize text-tprimary">{v} sell price / g</h2>
+            <PriceChart points={history[v]} />
+          </div>
+        ))}
 
       {creating && (
         <Modal title="Add Purchase" onClose={() => setCreating(false)}>
