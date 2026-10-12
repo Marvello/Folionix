@@ -1,11 +1,17 @@
 // app/src/services/gold.ts
 import {
   getGoldPurchases, addGoldPurchase, deactivateGoldPurchase,
-  saveGoldSnapshot,
+  saveGoldSnapshot, getLatestGoldMids,
 } from '../db/db'
-import { fetchGoldPrices } from '../providers/cermati'
+import { fetchGoldPrices, type GoldPriceResult } from '../providers/cermati'
+import { sendTelegram } from '../telegram/client'
 import { foldWeightedAvg, type LedgerLot } from '../../../lib/ledger'
+import { fmtIdr, escapeHtml } from '../../../lib/format'
 import type { GoldPurchaseRow } from '../../../lib/types'
+
+// Alert when mid price moves at least this % since the previous pull.
+const GOLD_ALERT_PCT = Number(process.env.GOLD_ALERT_PCT ?? 3)
+const SEND_TELEGRAM = process.env.SEND_TELEGRAM !== 'false'
 
 export interface GoldHolding {
   venue: string
@@ -19,11 +25,43 @@ export interface GoldHolding {
   realizedPnl: number
 }
 
+/**
+ * Significant-move check: compare the new mid to the previous pull's mid.
+ * Pure so it's unit-testable; returns null when there's nothing to compare.
+ */
+export function evaluateGoldAlert(
+  prevMid: number | null,
+  newMid: number | null,
+  thresholdPct: number,
+): { alert: boolean; pct: number; dir: 'up' | 'down' } | null {
+  if (prevMid == null || newMid == null || prevMid <= 0) return null
+  const pct = ((newMid - prevMid) / prevMid) * 100
+  return { alert: Math.abs(pct) >= thresholdPct, pct, dir: pct >= 0 ? 'up' : 'down' }
+}
+
+async function maybeAlertGold(venue: string, r: GoldPriceResult, prevMid: number | null): Promise<void> {
+  const newMid = r.mid ?? (r.buy + r.sell) / 2
+  const ev = evaluateGoldAlert(prevMid, newMid, GOLD_ALERT_PCT)
+  if (!ev?.alert) return
+  const arrow = ev.dir === 'up' ? '🔺' : '🔻'
+  const hint = ev.dir === 'up'
+    ? 'Sell price climbing — consider selling.'
+    : 'Price dropping — consider buying.'
+  const msg =
+    `🥇 <b>Gold (${escapeHtml(venue)})</b> mid ${arrow} ${ev.pct >= 0 ? '+' : ''}${ev.pct.toFixed(1)}% since last check\n` +
+    `Buy ${fmtIdr(r.buy)}/g · Sell ${fmtIdr(r.sell)}/g\n` +
+    `<i>${hint}</i>`
+  if (SEND_TELEGRAM) await sendTelegram(msg)
+}
+
 export async function refreshGoldPrices(): Promise<void> {
   const prices = await fetchGoldPrices()
   const venues = Object.entries(prices)
+  // Read the current mids before we overwrite "latest" with the new pull.
+  const prevMids = await getLatestGoldMids()
   for (const [venue, result] of venues) {
     await saveGoldSnapshot(venue, result)
+    await maybeAlertGold(venue, result, prevMids[venue] ?? null)
   }
   // An empty provider response used to log "refreshed 0 venues" and look like a
   // success, indistinguishable from "not due yet" when reading the log later.

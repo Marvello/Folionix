@@ -733,6 +733,18 @@ export async function getLatestGoldPrices(): Promise<Array<{ venue: string; sell
   return rows
 }
 
+// Current mid price per venue (the "previous pull" when read before a refresh
+// writes new snapshots). Falls back to (buy+sell)/2 when the provider omits mid.
+export async function getLatestGoldMids(): Promise<Record<string, number>> {
+  const { rows } = await q(`SELECT venue, mid_price, buy_price, sell_price FROM latest_gold_prices`)
+  const out: Record<string, number> = {}
+  for (const r of rows) {
+    const mid = r.mid_price ?? (r.buy_price != null && r.sell_price != null ? (r.buy_price + r.sell_price) / 2 : null)
+    if (mid != null) out[r.venue] = mid
+  }
+  return out
+}
+
 export async function getLatestFundNavs(): Promise<Array<{ fund_code: string; nav: number | null }>> {
   const { rows } = await q(`SELECT fund_code, nav FROM latest_fund_navs`)
   return rows
