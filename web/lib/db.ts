@@ -21,6 +21,10 @@ pg.types.setTypeParser(1082, (v: string) => v);   // date
 pg.types.setTypeParser(1114, (v: string) => v);   // timestamp
 pg.types.setTypeParser(1184, (v: string) => v);   // timestamptz
 pg.types.setTypeParser(1700, (v: string) => parseFloat(v)); // numeric → number (ledger columns, migration 046)
+// bigint (int8) → number: bigserial primary keys arrive as int8 and would
+// otherwise be strings, which breaks server actions that validate ids with a
+// strict typeof === 'number' check (vId). Ids are small serials — safe for Number.
+pg.types.setTypeParser(20, (v: string) => Number(v));
 
 let _pool: pg.Pool | null = null;
 
