@@ -728,6 +728,28 @@ export async function getLatestSnapshots(): Promise<StockSnapshotRow[]> {
   return rows
 }
 
+// ── bond_registrations (new-bond alert dedup) ──
+export async function countBondRegistrations(): Promise<number> {
+  const { rows } = await q(`SELECT count(*)::int AS n FROM bond_registrations`)
+  return rows[0]?.n ?? 0
+}
+
+export async function selectKnownRegistrationRefs(refs: string[]): Promise<string[]> {
+  if (refs.length === 0) return []
+  const { rows } = await q(`SELECT ref FROM bond_registrations WHERE ref = ANY($1::text[])`, [refs])
+  return rows.map((r) => r.ref as string)
+}
+
+export async function insertBondRegistration(rec: {
+  ref: string; title: string; kind: string; registered_at: string; coupon_pct: number | null; pdf_url: string
+}): Promise<void> {
+  await q(
+    `INSERT INTO bond_registrations (ref, title, kind, registered_at, coupon_pct, pdf_url)
+     VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (ref) DO NOTHING`,
+    [rec.ref, rec.title, rec.kind, rec.registered_at, rec.coupon_pct, rec.pdf_url],
+  )
+}
+
 export async function getLatestGoldPrices(): Promise<Array<{ venue: string; sell_price: number | null }>> {
   const { rows } = await q(`SELECT venue, sell_price FROM latest_gold_prices`)
   return rows

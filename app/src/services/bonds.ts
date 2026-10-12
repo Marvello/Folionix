@@ -2,8 +2,9 @@
 import {
   getBondHoldings, saveBondCouponPayment, upsertBondCouponSchedule,
   getBondScheduleForDate, getBondCouponScheduleDates, getBondCouponPaymentRows,
+  countBondRegistrations, selectKnownRegistrationRefs, insertBondRegistration,
 } from '../db/db'
-import { fetchCouponSchedule } from '../providers/ksei'
+import { fetchCouponSchedule, fetchNewSecurities, fetchCoupon, type NewBondKind } from '../providers/ksei'
 import { sendTelegram } from '../telegram/client'
 import { escapeHtml, fmtIdr, WIB } from '../../../lib/format'
 import { estimateCouponNet, inferPaymentsPerYear, latestPaymentByHolding, BOND_COUPON_TAX } from '../../../lib/coupon'
@@ -112,4 +113,57 @@ export async function sendCouponReminders(): Promise<void> {
     lines.join('\n') +
     `\n\nTotal est. ~${fmtIdr(grand)}\n<i>Estimate from coupon rate — confirm actual on payout.</i>`,
   )
+}
+
+// ── NEW BOND REGISTRATIONS (high-coupon alert) ──────────────────────────────
+//
+// Daily (09:00 + 15:00 WIB) check of KSEI's new-securities registrations.
+// A newly-registered corporate bond/sukuk/NCD alerts only when its top tranche
+// coupon exceeds BOND_ALERT_MIN_COUPON_PCT (default 9). When the coupon can't
+// be read from the registration PDF, we alert anyway, flagged "coupon unknown"
+// (never silently drop a potential high-yield bond). Dedup is by KSEI ref no.
+
+function buildBondRegAlert(
+  b: { title: string; kind: NewBondKind; date: string; pdfUrl: string },
+  coupon: number | null,
+): string {
+  const couponLine = coupon == null ? 'coupon unknown — check PDF' : `coupon ${coupon}%`
+  return (
+    `🆕 <b>New bond registered</b>\n` +
+    `${escapeHtml(b.title)}\n` +
+    `${b.kind} · ${couponLine} · reg ${b.date}\n` +
+    `${escapeHtml(b.pdfUrl)}`
+  )
+}
+
+export async function checkNewBondRegistrations(): Promise<void> {
+  const minCoupon = Number(process.env.BOND_ALERT_MIN_COUPON_PCT ?? 9)
+  const sendOk = process.env.SEND_TELEGRAM !== 'false'
+
+  const bonds = await fetchNewSecurities()
+  if (bonds.length === 0) return
+
+  // First run on an empty table: seed everything silently so a fresh deploy
+  // doesn't alert the whole current-month list at once.
+  if ((await countBondRegistrations()) === 0) {
+    for (const b of bonds) {
+      await insertBondRegistration({
+        ref: b.ref, title: b.title, kind: b.kind, registered_at: b.date, coupon_pct: null, pdf_url: b.pdfUrl,
+      })
+    }
+    console.log(`[bonds] seeded ${bonds.length} existing registrations (no alerts)`)
+    return
+  }
+
+  const known = new Set(await selectKnownRegistrationRefs(bonds.map((b) => b.ref)))
+  for (const b of bonds) {
+    if (known.has(b.ref)) continue
+    const coupon = await fetchCoupon(b.pdfUrl)
+    await insertBondRegistration({
+      ref: b.ref, title: b.title, kind: b.kind, registered_at: b.date, coupon_pct: coupon, pdf_url: b.pdfUrl,
+    })
+    if ((coupon == null || coupon > minCoupon) && sendOk) {
+      await sendTelegram(buildBondRegAlert(b, coupon))
+    }
+  }
 }

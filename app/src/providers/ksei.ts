@@ -170,3 +170,111 @@ export async function fetchCouponSchedule(series: string): Promise<CouponSchedul
     return []
   }
 }
+
+// ── NEW-SECURITIES REGISTRATION (new corporate bond alert) ──────────────────
+//
+// KSEI's "Pendaftaran Efek Baru" page lists each registration as a card:
+//   <h2 class="h4 no-margin">KSEI-####/DIR/mmyy</h2>
+//   <small class="muted"><b>09 Oktober 2026</b></small>
+//   <p class="no-margin">Pendaftaran Obligasi …</p>
+//   <a href="/Announcement/Files/….pdf">
+// The coupon is NOT on this page — only inside the linked registration PDF,
+// which carries a per-series "NN.NN % p.a" table (fetchCoupon reads it).
+
+const NEWSEC_HOST = 'https://web.ksei.co.id'
+const NEWSEC_URL = `${NEWSEC_HOST}/publications/new-securities-registration`
+
+const ID_MONTHS: Record<string, string> = {
+  januari: '01', februari: '02', maret: '03', april: '04', mei: '05', juni: '06',
+  juli: '07', agustus: '08', september: '09', oktober: '10', november: '11', desember: '12',
+}
+
+export type NewBondKind = 'OBLIGASI' | 'SUKUK' | 'NCD'
+
+export interface NewSecurityRef {
+  ref: string
+  date: string // ISO YYYY-MM-DD
+  title: string
+  pdfUrl: string
+}
+
+/** "09 Oktober 2026" → "2026-10-09"; null if unrecognised. */
+function parseIdDate(s: string): string | null {
+  const m = /(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})/.exec(s)
+  const mo = m && ID_MONTHS[m[2].toLowerCase()]
+  if (!m || !mo) return null
+  return `${m[3]}-${mo}-${m[1].padStart(2, '0')}`
+}
+
+/** Parse the announcement cards. Pure; one row per registration. */
+export function parseNewSecurities(html: string): NewSecurityRef[] {
+  const out: NewSecurityRef[] = []
+  for (const block of html.split(/<h2[^>]*>/i).slice(1)) {
+    const ref = /^([^<]+)</.exec(block)?.[1]?.trim()
+    if (!ref || !/^KSEI-/.test(ref)) continue
+    const date = parseIdDate(/<b>([^<]+)<\/b>/i.exec(block)?.[1] ?? '')
+    const title = /<p[^>]*>([^<]+)<\/p>/i.exec(block)?.[1]?.trim()
+    if (!date || !title) continue
+    const href = /href="(\/Announcement\/Files\/[^"]+\.pdf)"/i.exec(block)?.[1]
+    out.push({ ref, date, title, pdfUrl: href ? NEWSEC_HOST + href : '' })
+  }
+  return out
+}
+
+/** Bond instrument class from the registration title, or null for non-bonds
+ *  (warrants, S-INVEST products, mutual funds). */
+export function classifyBondTitle(title: string): NewBondKind | null {
+  const t = title.toLowerCase()
+  if (/\bobligasi\b/.test(t)) return 'OBLIGASI'
+  if (/\bsukuk\b/.test(t)) return 'SUKUK'
+  if (/\bncd\b|negotiable certificate/.test(t)) return 'NCD'
+  return null
+}
+
+/** All plausible coupon rates (% p.a) found in registration-PDF text.
+ *  A rate is 1–2 digits, optional decimals, then "%"; capped at 30 to exclude
+ *  stray percentages and never matches nominal amounts (no trailing %). */
+export function parseCouponRates(text: string): number[] {
+  const rates: number[] = []
+  const re = /(\d{1,2})(?:[.,](\d{1,2}))?\s*%/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    const n = Number(`${m[1]}.${m[2] ?? '0'}`)
+    if (n > 0 && n <= 30) rates.push(n)
+  }
+  return rates
+}
+
+/** Fetch + filter new bond registrations (bond kinds only). [] on any error. */
+export async function fetchNewSecurities(): Promise<Array<NewSecurityRef & { kind: NewBondKind }>> {
+  try {
+    return await withRetry(async () => {
+      const res = await fetch(NEWSEC_URL, { signal: AbortSignal.timeout(20_000), headers: FETCH_HEADERS })
+      if (!res.ok) throw new Error(`KSEI new-sec ${res.status}`)
+      const html = await res.text()
+      return parseNewSecurities(html)
+        .map((r) => ({ ...r, kind: classifyBondTitle(r.title) }))
+        .filter((r): r is NewSecurityRef & { kind: NewBondKind } => r.kind != null)
+    }, 3, 1000)
+  } catch {
+    return []
+  }
+}
+
+/** Max tranche coupon (% p.a) from a registration PDF, or null if unreadable. */
+export async function fetchCoupon(pdfUrl: string): Promise<number | null> {
+  if (!pdfUrl) return null
+  try {
+    return await withRetry(async () => {
+      const res = await fetch(pdfUrl, { signal: AbortSignal.timeout(30_000), headers: FETCH_HEADERS })
+      if (!res.ok) throw new Error(`KSEI pdf ${res.status}`)
+      const buf = new Uint8Array(await res.arrayBuffer())
+      const { extractText } = await import('unpdf')
+      const { text } = await extractText(buf, { mergePages: true })
+      const rates = parseCouponRates(Array.isArray(text) ? text.join('\n') : text)
+      return rates.length ? Math.max(...rates) : null
+    }, 2, 1000)
+  } catch {
+    return null
+  }
+}

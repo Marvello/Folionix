@@ -30,6 +30,7 @@
     "pg": "^8.23.0",
     "rss-parser": "^3",
     "tough-cookie": "^6.0.2",
+    "unpdf": "^1.8.1",
     "yahoo-finance2": "^4.0.2"
   },
   "devDependencies": {

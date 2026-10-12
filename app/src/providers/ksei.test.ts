@@ -128,3 +128,98 @@ describe('fetchCouponSchedule', () => {
     expect(schedule).toEqual([])
   })
 })
+
+// ── new-securities registration (new bond alert) ────────────────────────────
+
+// Real markup from web.ksei.co.id/publications/new-securities-registration:
+// each announcement = h2 (ref) · small>b (date) · p (title) · a[href] (pdf).
+const newSecHtml = `
+<div class="card">
+  <h2 class="h4 no-margin">KSEI-7442/DIR/1026</h2>
+  <small class="muted"><b>09 Oktober 2026</b></small>
+  <p class="no-margin">Pendaftaran Obligasi Berkelanjutan V Sarana Multi Infrastruktur Tahap II Tahun 2026</p>
+  <a class="btn btn--primary" href="/Announcement/Files/200437_ksei_7442_dir_1026_202610091832.pdf">unduh</a>
+</div>
+<div class="card">
+  <h2 class="h4 no-margin">KSEI-25538/JKU/1026</h2>
+  <small class="muted"><b>09 Oktober 2026</b></small>
+  <p class="no-margin">Pendaftaran Sukuk Berkelanjutan 2 Yang Ditawarkan Melalui Layanan Urun Dana</p>
+  <a class="btn btn--primary" href="/Announcement/Files/200436_ksei_25538_jku_1026_202610091723.pdf">unduh</a>
+</div>
+<div class="card">
+  <h2 class="h4 no-margin">KSEI-9001/DIR/1026</h2>
+  <small class="muted"><b>08 Oktober 2026</b></small>
+  <p class="no-margin">Pendaftaran NCD IV BANK BJB TAHUN 2026</p>
+  <a class="btn btn--primary" href="/Announcement/Files/200400_ksei_9001_dir_1026.pdf">unduh</a>
+</div>
+<div class="card">
+  <h2 class="h4 no-margin">KSEI-7439/DIR/1026 </h2>
+  <small class="muted"><b>09 Oktober 2026</b></small>
+  <p class="no-margin">Pengumuman KSEI Pendaftaran Produk Investasi di S-INVEST per 09 Oktober 2026</p>
+  <a class="btn btn--primary" href="/Announcement/Files/200399_ksei_7439_dir_1026.pdf">unduh</a>
+</div>
+<div class="card">
+  <h2 class="h4 no-margin">KSEI-8000/DIR/1026</h2>
+  <small class="muted"><b>07 Oktober 2026</b></small>
+  <p class="no-margin">Pendaftaran Waran Terstruktur Seri ABCD</p>
+  <a class="btn btn--primary" href="/Announcement/Files/200350_ksei_8000_dir_1026.pdf">unduh</a>
+</div>
+`
+
+describe('parseNewSecurities', () => {
+  it('parses each announcement into ref, ISO date, title, absolute pdf url', async () => {
+    const { parseNewSecurities } = await import('./ksei.js')
+    const rows = parseNewSecurities(newSecHtml)
+    expect(rows).toHaveLength(5)
+    expect(rows[0]).toEqual({
+      ref: 'KSEI-7442/DIR/1026',
+      date: '2026-10-09',
+      title: 'Pendaftaran Obligasi Berkelanjutan V Sarana Multi Infrastruktur Tahap II Tahun 2026',
+      pdfUrl: 'https://web.ksei.co.id/Announcement/Files/200437_ksei_7442_dir_1026_202610091832.pdf',
+    })
+  })
+
+  it('trims whitespace from the ref number', async () => {
+    const { parseNewSecurities } = await import('./ksei.js')
+    const rows = parseNewSecurities(newSecHtml)
+    expect(rows.find((r) => r.title.includes('S-INVEST'))?.ref).toBe('KSEI-7439/DIR/1026')
+  })
+})
+
+describe('classifyBondTitle', () => {
+  it('classifies obligasi, sukuk, and NCD', async () => {
+    const { classifyBondTitle } = await import('./ksei.js')
+    expect(classifyBondTitle('Pendaftaran Obligasi Berkelanjutan V Sarana Multi Infrastruktur')).toBe('OBLIGASI')
+    expect(classifyBondTitle('Pendaftaran Sukuk Mudharabah Berkelanjutan II')).toBe('SUKUK')
+    expect(classifyBondTitle('Pendaftaran NCD IV BANK BJB TAHUN 2026')).toBe('NCD')
+  })
+
+  it('rejects warrants, S-INVEST products and mutual funds', async () => {
+    const { classifyBondTitle } = await import('./ksei.js')
+    expect(classifyBondTitle('Pendaftaran Waran Terstruktur Seri ABCD')).toBeNull()
+    expect(classifyBondTitle('Pendaftaran Produk Investasi di S-INVEST per 09 Oktober 2026')).toBeNull()
+    expect(classifyBondTitle('Pendaftaran Reksa Dana Pasar Uang')).toBeNull()
+  })
+})
+
+describe('parseCouponRates', () => {
+  // Real extracted text from a KSEI registration PDF (Pindo Deli, 200433).
+  const pdfText = `Seri Jumlah Pokok Sebesar Jenis & Tingkat Bunga (Tetap) Frekwensi Pembayaran Bunga Jatuh Tempo Tenor
+A Rp918.465.000.000,- 10.00 % p.a Triwulan 27 Oktober 2029 3 Tahun
+B Rp97.990.000.000,- 10.50 % p.a Triwulan 27 Oktober 2031 5 Tahun`
+
+  it('extracts every tranche coupon, ignoring nominal amounts and tenor', async () => {
+    const { parseCouponRates } = await import('./ksei.js')
+    expect(parseCouponRates(pdfText)).toEqual([10.0, 10.5])
+  })
+
+  it('handles comma decimal separator', async () => {
+    const { parseCouponRates } = await import('./ksei.js')
+    expect(parseCouponRates('Seri A 8,75 % p.a')).toEqual([8.75])
+  })
+
+  it('returns empty array when no rate is present', async () => {
+    const { parseCouponRates } = await import('./ksei.js')
+    expect(parseCouponRates('Pendaftaran Obligasi tanpa rincian')).toEqual([])
+  })
+})

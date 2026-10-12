@@ -4,7 +4,7 @@ import { runCycle } from './orchestrator'
 import { detectSession, isMarketActive } from './session'
 import { runPortfolioPipeline } from '../services/portfolio'
 import { claimPendingRefresh, claimScheduledRun, hasPendingRefresh, pruneHistory } from '../db/db'
-import { syncBondCouponSchedules, sendCouponReminders } from '../services/bonds'
+import { syncBondCouponSchedules, sendCouponReminders, checkNewBondRegistrations } from '../services/bonds'
 import { syncDividendSchedules, sendDividendReminders } from '../services/dividends'
 import { refreshForexRates } from '../services/forex'
 import { refreshGoldPrices } from '../services/gold'
@@ -28,6 +28,11 @@ function envMinutes(name: string, def: number): number {
 const ACTIVE_INTERVAL_MS  = envMinutes('GRAPH_ACTIVE_INTERVAL', 5)
 const IDLE_INTERVAL_MS    = envMinutes('GRAPH_IDLE_INTERVAL', 30)
 const BOND_CHECK_HOUR_WIB = 8  // run bond schedule sync at 08:00 WIB daily
+// New-bond registration check — twice daily (default 09:00 + 15:00 WIB). Each
+// slot gets its own per-date latch so both fire; dedup by ref no makes a second
+// pass safe (it only alerts registrations posted since the first).
+const BOND_REG_CHECK_HOURS_WIB = (process.env.BOND_REG_CHECK_HOURS_WIB ?? '9,15')
+  .split(',').map((h) => Number(h.trim())).filter((h) => Number.isInteger(h) && h >= 0 && h <= 23)
 const DIVIDEND_CHECK_HOUR_WIB = 8 // dividend sync + reminders at 08:00 WIB daily
 const FOREX_CHECK_HOUR_WIB = 9 // run forex refresh at 09:00 WIB daily (market open)
 const ASSET_CHECK_HOUR_WIB = 17 // fund NAV refresh at 17:00 WIB daily (NAV final after close)
@@ -195,6 +200,18 @@ async function main(): Promise<void> {
     // Daily dividend schedule sync + reminders
     if (wibHour >= DIVIDEND_CHECK_HOUR_WIB && await due('dividends', todayWib)) {
       await runDividendDailyChecks()
+    }
+
+    // New-bond registration check — once per slot per day (09:00 + 15:00 WIB).
+    for (const slot of BOND_REG_CHECK_HOURS_WIB) {
+      if (wibHour >= slot && await due(`bond-reg-${slot}`, todayWib)) {
+        try {
+          console.log(`[runner] checking new bond registrations (slot ${slot}:00 WIB)...`)
+          await checkNewBondRegistrations()
+        } catch (err) {
+          console.error('[runner] bond registration check error:', err)
+        }
+      }
     }
 
     // Daily forex rate refresh
