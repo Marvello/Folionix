@@ -8,6 +8,7 @@ import {
 } from '../db/db'
 import type { AnalysisJobRow } from '../../../lib/types'
 import { runPendingMigrations } from '../db/migrate'
+import { startSettingsSync } from '../config/settings'
 import { beat } from '../utils/heartbeat'
 
 // An empty or non-numeric value must not become a 0ms busy loop against the DB.
@@ -50,6 +51,7 @@ process.on('SIGTERM', () => {
 async function main(): Promise<void> {
   beat()
   await runPendingMigrations()
+  await startSettingsSync()
   console.log('[worker] starting analysis-job worker')
 
   const sweepStale = async (): Promise<void> => {

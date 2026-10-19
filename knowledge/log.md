@@ -8,6 +8,17 @@ description: Dated record of OKF concept drift fixes and sync passes.
 Append-only. Newest entries first. Each entry records what drifted in the
 codebase and which concept(s) were updated to match.
 
+## 2026-10-19 — Runtime-editable settings
+
+- **New table [app_settings](tables/app-settings.md)** (migration 051): 20
+  non-secret tunables (signals/alerts, recommendation & AI, schedules) are now
+  editable from the web `/settings` page and applied by runner/worker/bot
+  within 60s. Precedence DB row > `.env` > default.
+- **[market signal](metrics/market-signal.md)** — thresholds note updated.
+- **Drift found, not fixed:** `NEWS_CACHE_HOURS` / `NEWS_FETCH_ENABLED` are
+  referenced by [sentiment-score](metrics/sentiment-score.md) and
+  [news-sentiment](pipelines/news-sentiment.md) but no code reads them.
+
 ## 2026-10-07 — Week review covers the whole portfolio
 
 `weekReview.ts` gained allocation/concentration, gold & fund per-unit week

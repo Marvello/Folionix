@@ -22,6 +22,7 @@ Base Postgres tables (`db/schema.sql`).
 - [forex_rates](forex-rates.md) — daily FX-to-IDR rates for foreign-currency fund valuation
 - [account_charges](account-charges.md) — account-level fees (reduce Total Return)
 - [weekly_reviews](weekly-reviews.md) — generated week-review reports (markdown + handover doc + stats)
+- [app_settings](app-settings.md) — runtime-editable tunables from the web /settings page (override .env)
 
 Infra-only (not OKF domain concepts): `schema_migrations` (migration ledger,
 see CLAUDE.md → Conventions).

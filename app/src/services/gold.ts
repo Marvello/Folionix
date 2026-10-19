@@ -9,10 +9,6 @@ import { foldWeightedAvg, type LedgerLot } from '../../../lib/ledger'
 import { fmtIdr, escapeHtml } from '../../../lib/format'
 import type { GoldPurchaseRow } from '../../../lib/types'
 
-// Alert when mid price moves at least this % since the previous pull.
-const GOLD_ALERT_PCT = Number(process.env.GOLD_ALERT_PCT ?? 3)
-const SEND_TELEGRAM = process.env.SEND_TELEGRAM !== 'false'
-
 export interface GoldHolding {
   venue: string
   grams: number            // net grams (buys − sells)
@@ -41,7 +37,7 @@ export function evaluateGoldAlert(
 
 async function maybeAlertGold(venue: string, r: GoldPriceResult, prevMid: number | null): Promise<void> {
   const newMid = r.mid ?? (r.buy + r.sell) / 2
-  const ev = evaluateGoldAlert(prevMid, newMid, GOLD_ALERT_PCT)
+  const ev = evaluateGoldAlert(prevMid, newMid, Number(process.env.GOLD_ALERT_PCT ?? 3))  // GOLD_ALERT_PCT: min mid-price move % since previous pull
   if (!ev?.alert) return
   const arrow = ev.dir === 'up' ? '🔺' : '🔻'
   const hint = ev.dir === 'up'
@@ -51,7 +47,7 @@ async function maybeAlertGold(venue: string, r: GoldPriceResult, prevMid: number
     `🥇 <b>Gold (${escapeHtml(venue)})</b> mid ${arrow} ${ev.pct >= 0 ? '+' : ''}${ev.pct.toFixed(1)}% since last check\n` +
     `Buy ${fmtIdr(r.buy)}/g · Sell ${fmtIdr(r.sell)}/g\n` +
     `<i>${hint}</i>`
-  if (SEND_TELEGRAM) await sendTelegram(msg)
+  if (process.env.SEND_TELEGRAM !== 'false') await sendTelegram(msg)
 }
 
 export async function refreshGoldPrices(): Promise<void> {

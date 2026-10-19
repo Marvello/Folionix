@@ -27,7 +27,6 @@ import type { AnalysisJobRow } from '../../../lib/types'
 // serially by the worker. Deterministic scores are computed once at enqueue
 // time and carried in the job payload so every persona judges identical data.
 
-const SEND_TELEGRAM = process.env.SEND_TELEGRAM !== 'false'
 
 /** "4🟢 1⚪ 1🔴" — readable vote split for the alert header (a raw net score isn't). */
 export function voteSplit(votes: { signal: string }[]): string {
@@ -164,7 +163,7 @@ export async function handleConsensusJob(job: AnalysisJobRow): Promise<Record<st
     raw, cleanHtml, recommendation, false, alertEval.isSame,
   )
   const header = `<b>${job.ticker.replace('.JK', '')}</b> — ${recommendation} (${voteSplit(votes)})\n\n`
-  if (SEND_TELEGRAM && !alertEval.isSame && await sendTelegram(header + cleanHtml + ALERT_FOOTER)) {
+  if (process.env.SEND_TELEGRAM !== 'false' && !alertEval.isSame && await sendTelegram(header + cleanHtml + ALERT_FOOTER)) {
     await markAnalysisSent(analysisId)
   }
   return { net, recommendation, votes: votes.length }

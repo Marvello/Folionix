@@ -2,6 +2,7 @@
 
 import { getPool } from "@/lib/db";
 import { auth } from "@/lib/auth";
+import { getSettingDef, validateCombination, validateSetting } from "@folionix/lib";
 
 // ── Guards ──
 // Every action is a public POST endpoint: proxy.ts is not a security boundary for
@@ -9,7 +10,9 @@ import { auth } from "@/lib/auth";
 // Text lengths mirror the varchar widths in db/schema.sql.
 
 async function requireSession() {
-  if (!(await auth())) throw new Error("Unauthorized");
+  const session = await auth();
+  if (!session) throw new Error("Unauthorized");
+  return session;
 }
 
 const TICKER_RE = /^(?:\^JKSE|[A-Z0-9]{1,7}\.JK)$/;
@@ -375,4 +378,46 @@ export async function insertFundDistribution(payload: {
     `INSERT INTO fund_distributions (fund_code, amount, paid_at, notes) VALUES ($1, $2, $3, $4)`,
     [vText(payload.fund_code, 40), vNum(payload.amount, "amount"), vDate(payload.paid_at, "paid date"), vText(payload.notes)],
   );
+}
+
+// ── Settings ──
+// Validation errors are returned, not thrown: production Next.js replaces thrown
+// Server Action messages with a generic one, and these must reach the user.
+
+type SettingResult = { error?: string };
+
+async function checkCombination(key: string, value: string | undefined): Promise<void> {
+  const { rows } = await getPool().query<{ key: string; value: string }>("SELECT key, value FROM app_settings");
+  const values: Record<string, string | undefined> = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  values[key] = value;
+  validateCombination(values);
+}
+
+export async function saveSetting(key: string, raw: string): Promise<SettingResult> {
+  const session = await requireSession();
+  let value: string;
+  try {
+    value = validateSetting(key, raw);
+    await checkCombination(key, value);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Invalid value" };
+  }
+  await getPool().query(
+    `INSERT INTO app_settings (key, value, updated_at, updated_by) VALUES ($1, $2, now(), $3)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = EXCLUDED.updated_by`,
+    [key, value, session.user?.email ?? null],
+  );
+  return {};
+}
+
+export async function resetSetting(key: string): Promise<SettingResult> {
+  await requireSession();
+  if (!getSettingDef(key)) return { error: "Unknown setting" };
+  try {
+    await checkCombination(key, undefined);
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Invalid value" };
+  }
+  await getPool().query("DELETE FROM app_settings WHERE key = $1", [key]);
+  return {};
 }

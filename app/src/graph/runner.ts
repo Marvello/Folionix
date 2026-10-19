@@ -14,6 +14,7 @@ import { computeValuations, refreshPeers } from '../services/peers'
 import { runWeekReview } from '../services/weekReview'
 import type { OrchestratorState } from './state'
 import { runPendingMigrations } from '../db/migrate'
+import { startSettingsSync } from '../config/settings'
 import { beat } from '../utils/heartbeat'
 
 /** Positive minutes from env, else the default — "" or "5m" must not become a ~1ms busy loop. */
@@ -31,7 +32,8 @@ const BOND_CHECK_HOUR_WIB = 8  // run bond schedule sync at 08:00 WIB daily
 // New-bond registration check — twice daily (default 09:00 + 15:00 WIB). Each
 // slot gets its own per-date latch so both fire; dedup by ref no makes a second
 // pass safe (it only alerts registrations posted since the first).
-const BOND_REG_CHECK_HOURS_WIB = (process.env.BOND_REG_CHECK_HOURS_WIB ?? '9,15')
+// Read per cycle (not at boot) so /settings edits apply without a restart.
+const bondRegCheckHoursWib = (): number[] => (process.env.BOND_REG_CHECK_HOURS_WIB ?? '9,15')
   .split(',').map((h) => Number(h.trim())).filter((h) => Number.isInteger(h) && h >= 0 && h <= 23)
 const DIVIDEND_CHECK_HOUR_WIB = 8 // dividend sync + reminders at 08:00 WIB daily
 const FOREX_CHECK_HOUR_WIB = 9 // run forex refresh at 09:00 WIB daily (market open)
@@ -41,16 +43,15 @@ const ASSET_CHECK_HOUR_WIB = 17 // fund NAV refresh at 17:00 WIB daily (NAV fina
 // otherwise become NaN and disable the sweep silently and permanently, so fall
 // back loudly. Note 0 is a valid hour, which is why this is a finite check and
 // not a falsy check.
-const rawFundamentalsHour = Number(process.env.FUNDAMENTALS_HOUR_WIB ?? 18)
-const FUNDAMENTALS_HOUR_WIB = Number.isFinite(rawFundamentalsHour)
-  ? Math.min(23, Math.max(0, rawFundamentalsHour))
-  : 18
-if (!Number.isFinite(rawFundamentalsHour)) {
+function fundamentalsHourWib(): number {
+  const raw = Number(process.env.FUNDAMENTALS_HOUR_WIB ?? 18)
+  if (Number.isFinite(raw)) return Math.min(23, Math.max(0, raw))
   console.warn(`[runner] FUNDAMENTALS_HOUR_WIB="${process.env.FUNDAMENTALS_HOUR_WIB}" is not a number, using 18`)
+  return 18
 }
 // Gold moves intraday and its venue quotes are not tied to the IDX close, so it
 // runs on its own clock rather than riding the daily fund sweep.
-const GOLD_INTERVAL_MS = Number(process.env.GOLD_REFRESH_HOURS ?? 3) * 3_600_000
+const goldIntervalMs = (): number => (Number(process.env.GOLD_REFRESH_HOURS) > 0 ? Number(process.env.GOLD_REFRESH_HOURS) : 3) * 3_600_000
 const WEEK_REVIEW_HOUR_WIB = 9  // weekly review Saturday >= 09:00 WIB (after market week closes)
 const WEEK_REVIEW_DAY_WIB = 6   // Saturday in WIB
 // History retention is a data-deletion policy, so it is opt-in: unset = keep everything.
@@ -139,6 +140,7 @@ async function runGoldRefresh(reason: string): Promise<void> {
 async function main(): Promise<void> {
   beat()
   await runPendingMigrations()
+  await startSettingsSync()
   console.log(`[runner] starting orchestrator (build ${process.env.GIT_COMMIT?.slice(0, 8) ?? 'dev'})`)
 
   let state: OrchestratorState = {
@@ -203,7 +205,7 @@ async function main(): Promise<void> {
     }
 
     // New-bond registration check — once per slot per day (09:00 + 15:00 WIB).
-    for (const slot of BOND_REG_CHECK_HOURS_WIB) {
+    for (const slot of bondRegCheckHoursWib()) {
       if (wibHour >= slot && await due(`bond-reg-${slot}`, todayWib)) {
         try {
           console.log(`[runner] checking new bond registrations (slot ${slot}:00 WIB)...`)
@@ -232,9 +234,10 @@ async function main(): Promise<void> {
 
     // Gold on its own cadence: every GOLD_REFRESH_HOURS, independent of the WIB
     // clock, so a restart refreshes immediately and gaps stay bounded.
-    if (Date.now() - lastGoldRefreshMs >= GOLD_INTERVAL_MS) {
+    const goldMs = goldIntervalMs()
+    if (Date.now() - lastGoldRefreshMs >= goldMs) {
       lastGoldRefreshMs = Date.now()
-      await runGoldRefresh(`every ${GOLD_INTERVAL_MS / 3_600_000}h`)
+      await runGoldRefresh(`every ${goldMs / 3_600_000}h`)
     }
 
     // Daily fund NAV refresh (>= so a cycle landing after 17:00 still runs it)
@@ -243,7 +246,7 @@ async function main(): Promise<void> {
     }
 
     // Daily fundamentals sweep (>= so a cycle landing after 18:00 still runs it)
-    if (wibHour >= FUNDAMENTALS_HOUR_WIB && await due('fundamentals', todayWib)) {
+    if (wibHour >= fundamentalsHourWib() && await due('fundamentals', todayWib)) {
       try {
         console.log('[runner] refreshing fundamentals...')
         const rs = await refreshFundamentals()

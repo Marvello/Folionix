@@ -13,7 +13,7 @@ status: stable
 # market signal
 
 `signals.classify_signal` maps [day change %](day-change-pct.md) and
-[volume ratio](volume-ratio.md) to a signal. Default thresholds (env-tunable):
+[volume ratio](volume-ratio.md) to a signal. Default thresholds (editable at runtime on the web /settings page — see [app_settings](../tables/app-settings.md) — else `.env`):
 
 - Price: MINOR ≥ `SIGNAL_PRICE_MINOR` (3.0%), MAJOR ≥ `SIGNAL_PRICE_MAJOR` (5.0%)
 - Volume: MINOR > `SIGNAL_VOLUME_MINOR` (1.5×), MAJOR ≥ `SIGNAL_VOLUME_MAJOR` (3.0×)

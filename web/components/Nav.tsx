@@ -16,6 +16,7 @@ const NAV_LINKS = [
   { href: "/bonds", label: "Bonds" },
   { href: "/news", label: "News" },
   { href: "/reviews", label: "Reviews" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function Nav() {

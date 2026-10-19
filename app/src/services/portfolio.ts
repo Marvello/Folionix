@@ -15,14 +15,19 @@ import { mapPool } from '../utils/mapPool.js'
 
 type Depth = 'LIGHT' | 'FULL' | 'DEEP'
 
-const REC_STABILITY_PCT = Math.max(0, Number(process.env.REC_STABILITY_PCT) || 2) / 100
+// Read per call (not at import) so /settings edits apply without a restart.
+// 0 is valid ("always re-analyse"); unset, blank or garbage falls back to 2.
+const recStabilityPct = () => {
+  const raw = process.env.REC_STABILITY_PCT
+  const v = raw?.trim() ? Number(raw) : NaN
+  return (v >= 0 ? v : 2) / 100
+}
 // Force a refresh once a call goes stale, even if price never moved.
-const REC_MAX_AGE_HOURS = Math.max(0, Number(process.env.REC_MAX_AGE_HOURS) || 72)
+const recMaxAgeHours = () => Math.max(0, Number(process.env.REC_MAX_AGE_HOURS) || 72)
 export type AlertMode = 'spike' | 'dedup' | 'silent'
 
-const SEND_TELEGRAM = process.env.SEND_TELEGRAM !== 'false'
 const NO_LLM = process.argv.includes('--no-llm')
-const NO_TELEGRAM = process.argv.includes('--no-telegram') || !SEND_TELEGRAM
+const noTelegram = () => process.argv.includes('--no-telegram') || process.env.SEND_TELEGRAM === 'false'
 
 // Cap concurrent provider fetches so a large portfolio can't burst Yahoo/Finnhub
 // and trip their rate limits.
@@ -126,7 +131,7 @@ async function analyzeOneTicker(
   // a repeated unchanged HOLD is noise, not a recommendation.
   const prevPrice = prevAnalysis ? await getSnapshotPrice(prevAnalysis.snapshot_id) : null
   const gate = shouldReanalyze(
-    prevAnalysis, prevPrice, snap.current_price, REC_STABILITY_PCT, REC_MAX_AGE_HOURS, new Date(),
+    prevAnalysis, prevPrice, snap.current_price, recStabilityPct(), recMaxAgeHours(), new Date(),
   )
   if (!gate.reanalyze) {
     console.log(`[analysis] ${jk}: skipped (${gate.reason})`)
@@ -156,7 +161,7 @@ async function analyzeOneTicker(
   // and 'dedup' (manual runs) both alert only when the recommendation changed
   // or the WIB day rolled over — repeating an unchanged verdict is noise.
   // UNKNOWN = the model skipped or garbled its REKOMENDASI line: store it, never alert on it.
-  const shouldSend = !NO_TELEGRAM && alerts !== 'silent' && !alertEval.isSame && recommendation !== 'UNKNOWN'
+  const shouldSend = !noTelegram() && alerts !== 'silent' && !alertEval.isSame && recommendation !== 'UNKNOWN'
   const header = `<b>${jk.replace('.JK', '')}</b> — ${recommendation}\n\n`
   const sent = shouldSend && await sendTelegram(header + cleanHtml + ALERT_FOOTER)
 

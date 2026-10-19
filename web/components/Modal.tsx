@@ -18,6 +18,13 @@ export default function Modal({
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
+  // Callers pass an inline onClose, a new function every render. Depending on it
+  // re-ran the effect on each keystroke, yanking focus out of the input onto the
+  // first button (✕) — so read the latest one through a ref and run once on mount.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     const trigger = document.activeElement as HTMLElement | null;
@@ -27,7 +34,7 @@ export default function Modal({
     )?.focus();
 
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     }
     document.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
@@ -38,7 +45,7 @@ export default function Modal({
       document.body.style.overflow = prevOverflow;
       trigger?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div

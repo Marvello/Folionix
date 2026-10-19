@@ -315,6 +315,7 @@ Single-level flat nav — no groups, no collapsible sections:
 | Bonds | `/bonds` |
 | News | `/news` |
 | Reviews | `/reviews` |
+| Settings | `/settings` (runtime-editable tunables, see `lib/settings.ts`) |
 
 Ticker detail lives at `/stocks?ticker=BBCA`. `TickerDetail` takes `backHref="/stocks"`.
 
