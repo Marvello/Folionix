@@ -1,3 +1,61 @@
+# Online-editable settings (no redeploy)
+
+## Goal
+Move non-secret tunables from `.env` to a Postgres table editable from the web
+dashboard. Precedence: **DB row > `.env` > code default**. Delete row = back to `.env`.
+
+## Scope (user-confirmed)
+- Alerts & signals: `SIGNAL_PRICE_MINOR/MAJOR`, `SIGNAL_VOLUME_MINOR/MAJOR`, `SIGNAL_COOLDOWN_MIN`,
+  `GOLD_ALERT_PCT`, `BOND_ALERT_MIN_COUPON_PCT`, `SEND_TELEGRAM`
+- Recommendation & AI: `REC_STABILITY_PCT`, `REC_MAX_AGE_HOURS`, `PERSONAS`, `DEEP_RUNS_ENABLED`,
+  `CONSENSUS_MIN_PERSONAS`, `LLM_MODEL`, `LLM_FALLBACK_MODEL`
+- Schedules: `GRAPH_ANALYSIS_INTERVAL`, `GOLD_REFRESH_HOURS`, `FUNDAMENTALS_HOUR_WIB`,
+  `BOND_REG_CHECK_HOURS_WIB`, `CACHE_MINUTES`
+- Out: secrets/infra (DB, auth, tokens, API keys/base URLs, SMTP, cookies), housekeeping.
+- Note: `NEWS_CACHE_HOURS` / `NEWS_FETCH_ENABLED` are documented but **not read anywhere** →
+  drop from CLAUDE.md, don't add.
+
+## Design
+- [x] `db/migrations/051_app_settings.sql`: `app_settings(key text PK, value text NOT NULL,
+      updated_at timestamptz default now(), updated_by text)`.
+- [x] `lib/settings.ts` (shared app+web): `SETTINGS` registry `{ key, group, type: number|bool|hours|personas|text, min?, max?, help }`
+      + pure `validateSetting(key, raw) → string | error`. Single whitelist for both sides.
+- [x] `app/src/config/settings.ts`: `syncSettings()` — snapshot original `process.env` once,
+      read `app_settings`, overlay whitelisted keys onto `process.env`, restore snapshot for
+      removed rows. `startSettingsSync()` = await once + `setInterval(60s).unref()`; DB error → keep last values, warn.
+- [x] Call `startSettingsSync()` at boot in `runner.ts`, `worker.ts`, `bot.ts` (one line each).
+- [x] Turn module-level consts into per-call reads (otherwise frozen at boot):
+      `market.ts` CACHE_MINUTES, `portfolio.ts` REC_* + SEND_TELEGRAM, `gold.ts` GOLD_ALERT_PCT + SEND_TELEGRAM,
+      `deepRun.ts` SEND_TELEGRAM, `runner.ts` BOND_REG_CHECK_HOURS_WIB / FUNDAMENTALS_HOUR_WIB / GOLD_INTERVAL_MS.
+      LLM_MODEL: check `llm.ts` builds the model per call, not cached.
+- [x] Web `/settings` page (Server Component, grouped form, shows effective value + source DB/env/default)
+      + Server Actions `saveSetting` / `resetSetting` in `web/app/actions.ts` → `requireSession()` +
+      `validateSetting()`; `updated_by` = session email. Nav link.
+- [x] Tests: `lib/settings.test.ts` (validation), `syncSettings` overlay/restore test, action test.
+- [x] Docs: CLAUDE.md Key Configuration (mark DB-overridable keys), knowledge/, common-tech memory.
+
+## Behaviour notes
+- Changes apply ≤60s in runner/worker/bot. No restart.
+- Web reads DB directly for display; only the app processes consume overlay.
+- Bad value in DB can't happen (validated on write); overlay still re-validates and skips invalid rows.
+
+## Review (2026-10-19)
+- Done as planned. 20 settings, each with plain-language help + example where useful; cross-checks
+  (minor < major thresholds; min persona votes ≤ enabled personas) enforced on save.
+- Verified: app tsc + 387 tests, lib 5 settings tests, web tsc + 67 tests + `next build`; migration 051
+  applied on a throwaway Postgres 18 (`migrate --check` clean); live overlay test (DB wins, non-whitelisted
+  ignored, delete → .env value back); browser: page renders, invalid save shows error in dialog, valid save
+  persists with editor email, reset deletes row.
+- Found + fixed pre-existing bug: shared `Modal` re-ran its focus effect on every render (inline `onClose`),
+  so after the first keystroke focus jumped to ✕ in every add/edit dialog app-wide.
+- Corrected help text vs first draft after reading code: REC_STABILITY_PCT also gates signal-triggered
+  analyses; SEND_TELEGRAM does not gate dividend/coupon reminders or the weekly review ping;
+  CACHE_MINUTES only affects analysis fetches (price refresh always forces).
+- Not done: one-shot CLIs (`npm run portfolio`, …) don't sync settings; knowledge docs still cite unused
+  NEWS_CACHE_HOURS / NEWS_FETCH_ENABLED (logged in knowledge/log.md).
+
+---
+
 # New corporate bond alert — high-coupon only (KSEI new-securities registration)
 
 ## Goal

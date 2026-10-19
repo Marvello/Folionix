@@ -6,7 +6,6 @@ import type { SnapshotInput } from '../db/db'
 import { fetchFinnhubQuote } from './finnhub'
 import { withRetry } from '../utils/retry'
 
-const CACHE_MINUTES = Number(process.env.CACHE_MINUTES ?? 15)
 
 // v3 exports the YahooFinance class as default; one shared instance keeps the
 // cookie/crumb jar warm across tickers.
@@ -100,7 +99,7 @@ export async function fetchStock(
     const cached = await getLatestSnapshot(storeTicker)
     if (cached?.fetched_at) {
       const age = (Date.now() - new Date(cached.fetched_at).getTime()) / 60_000
-      if (age < CACHE_MINUTES) {
+      if (age < Number(process.env.CACHE_MINUTES ?? 15)) {
         const { fetched_at: _fetched, ...snap } = cached   // keep id: saveSnapshot reuses the row
         return snap as unknown as SnapshotInput
       }

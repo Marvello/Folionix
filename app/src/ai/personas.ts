@@ -1,4 +1,5 @@
 import { extractJson } from './llm'
+import { PERSONA_KEYS } from '../../../lib/settings'
 import type { AnalystScores } from './scores'
 
 // ── INVESTOR PERSONAS ───────────────────────────────────────────────────────
@@ -101,10 +102,7 @@ export const PERSONAS: Record<string, PersonaDef> = {
 // balanced: PERSONAS=N used to take the first N in definition order — all value
 // investors. The first six are the default: the remaining six largely duplicate
 // them on the data the payload carries (Buffett≈Munger, Graham≈Pabrai, Lynch≈Fisher).
-const BALANCED_ORDER = [
-  'buffett', 'burry', 'lynch', 'druckenmiller', 'graham', 'wood',
-  'damodaran', 'munger', 'fisher', 'ackman', 'pabrai', 'jhunjhunwala',
-]
+const BALANCED_ORDER = PERSONA_KEYS
 const DEFAULT_COUNT = 6
 
 export function enabledPersonas(): PersonaDef[] {

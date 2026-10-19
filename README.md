@@ -172,6 +172,12 @@ Pin a specific deploy with `FOLIONIX_TAG=<sha8> docker compose -f docker/docker-
 
 ## Configuration
 
+Non-secret tunables (signal/alert thresholds, `SEND_TELEGRAM`, recommendation & AI
+options incl. `LLM_MODEL`, and schedules) can be changed at runtime on the web
+**Settings** page — no redeploy; runner, worker and bot pick changes up within a minute.
+A value saved there overrides `.env`; "Reset to default" falls back to `.env`. Each
+setting is explained on that page (source: `lib/settings.ts`).
+
 | Variable | Description |
 |----------|-------------|
 | `DATABASE_URL` | Postgres connection string — read by both `app/` and `web/`; server-side only |

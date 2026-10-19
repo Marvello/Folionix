@@ -12,6 +12,24 @@ tables/pipelines/metrics concepts and [log.md](log.md) don't capture. The
 concepts describe *what* is live; this file records *why*. Distilled from the
 design specs that used to live under `docs/superpowers/`.
 
+## 2026-10-19 — runtime-editable settings
+
+Concept: [app_settings](tables/app-settings.md).
+
+- **Overlay onto `process.env`, not a config API.** Every tunable was already
+  read as `process.env.X`; overlaying DB rows onto `process.env` every 60s kept
+  those call sites unchanged. Only module-level consts (frozen at import) were
+  turned into per-call reads.
+- **Postgres table over a file/k8s ConfigMap.** The DB is already shared by
+  web and app; a ConfigMap edit still needs a rollout.
+- **Secrets excluded.** Any DB access is full access (no RLS) and the web app
+  writes the table, so tokens/keys/URLs stay in `.env`.
+- **Single whitelist in `lib/settings.ts`** — keys, types, ranges, defaults and
+  the user-facing help text in one place, used by both the web validator and
+  the backend overlay (which re-validates and skips bad rows).
+- **Validation errors are returned, not thrown,** from the Server Actions:
+  production Next.js masks thrown action messages.
+
 ## 2026-07-13 — dividend schedule + reminders
 
 Concepts: [dividend_schedule](tables/dividend-schedule.md),

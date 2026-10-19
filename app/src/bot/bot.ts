@@ -13,6 +13,7 @@ import { runWeekReview } from '../services/weekReview'
 import { fetchGoldPrices } from '../providers/cermati'
 import { displayTicker, escapeHtml, fmtIdr, fmtCap, normalizeTicker } from '../../../lib/format'
 import { runPendingMigrations } from '../db/migrate'
+import { startSettingsSync } from '../config/settings'
 
 // IDX codes are 4 chars; 7 + '.JK' still fits the varchar(10) ticker columns.
 const TICKER_RE = /^[A-Z0-9]{1,7}$/
@@ -328,6 +329,7 @@ bot.command('weekreview', guard(async (ctx) => {
 }))
 
   await runPendingMigrations()
+  await startSettingsSync()
   // Errors thrown outside guard (middleware, network) would otherwise stop polling.
   bot.catch(err => console.error('[bot] unhandled update error:', err.error))
   console.log('[bot] starting long-polling...')
