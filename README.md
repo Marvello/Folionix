@@ -4,6 +4,8 @@
 
 Self-hosted wealth command center — IDX stocks, gold, mutual funds, and bonds in one place. Watches the market continuously, runs local LLM analysis, sends Telegram alerts, and serves a Next.js dashboard. Your server, your data.
 
+**Project page:** [marvello.xyz/folionix](https://marvello.xyz/folionix)
+
 ![Node](https://img.shields.io/badge/node-22+-5fa04e?logo=node.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/typescript-5-3178c6?logo=typescript&logoColor=white)
 ![Docker](https://img.shields.io/badge/docker-compose-2496ed?logo=docker&logoColor=white)
