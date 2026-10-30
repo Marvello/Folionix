@@ -1,8 +1,18 @@
 import NextAuth from "next-auth";
+import Authentik from "next-auth/providers/authentik";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
 import { getPool } from "./db";
 import { clearFailures, isLocked, recordFailure } from "./loginThrottle";
+import { findOidcUser, type OidcProfile } from "./oidcUser";
+
+// Authentik SSO is on only when configured (AUTH_AUTHENTIK_ID / _SECRET / _ISSUER, read by Auth.js by name).
+const authentikEnabled = Boolean(process.env.AUTH_AUTHENTIK_ISSUER);
+
+async function findUserByEmail(email: string) {
+  const { rows } = await getPool().query("SELECT id, email, name FROM users WHERE lower(email) = $1", [email]);
+  return rows[0];
+}
 
 // Compared against when the email is unknown, at the same cost as real hashes
 // (common-tech/tech-standard/password-hashing.md), so both paths take as long.
@@ -48,7 +58,25 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         return { id: String(user.id), email: user.email, name: user.name };
       },
     }),
+    ...(authentikEnabled ? [Authentik] : []),
   ],
+  callbacks: {
+    // SSO only signs in people who already have a users row (no public sign-up).
+    async signIn({ account, profile }) {
+      if (account?.provider !== "authentik") return true;
+      const user = await findOidcUser(profile as OidcProfile, findUserByEmail);
+      if (!user) console.warn(`[auth] authentik login refused email=${String(profile?.email)}`);
+      return Boolean(user);
+    },
+    // Make an SSO session carry the DB user, exactly like a Credentials one.
+    async jwt({ token, account, profile }) {
+      if (account?.provider === "authentik") {
+        const user = await findOidcUser(profile as OidcProfile, findUserByEmail);
+        if (user) Object.assign(token, { sub: user.id, email: user.email, name: user.name });
+      }
+      return token;
+    },
+  },
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
 });

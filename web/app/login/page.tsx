@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { signIn } from "next-auth/react";
+import { getProviders, signIn } from "next-auth/react";
 import { Field, PrimaryButton } from "@/components/Form";
 
 export default function LoginPage() {
@@ -10,12 +10,17 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
+  const [ssoDenied, setSsoDenied] = useState(false);
+  const [hasAuthentik, setHasAuthentik] = useState(false);
 
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).has("error")) {
+    const error = new URLSearchParams(window.location.search).get("error");
+    if (error) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time URL read on mount
-      setHasError(true);
+      if (error === "AccessDenied") setSsoDenied(true);
+      else setHasError(true);
     }
+    getProviders().then((p) => setHasAuthentik(Boolean(p?.authentik)));
   }, []);
 
   async function handleSignIn(e: React.FormEvent) {
@@ -54,6 +59,11 @@ export default function LoginPage() {
             Sign-in failed. Check your email and password.
           </p>
         )}
+        {ssoDenied && (
+          <p role="alert" className="mb-4 text-sm text-critical">
+            This Authentik account has no Folionix access.
+          </p>
+        )}
         <Field label="Email" className="mb-3">
           <input
             type="email"
@@ -77,6 +87,15 @@ export default function LoginPage() {
         <PrimaryButton disabled={loading} className="w-full">
           {loading ? "Signing in…" : "Sign in"}
         </PrimaryButton>
+        {hasAuthentik && (
+          <button
+            type="button"
+            onClick={() => signIn("authentik", { redirectTo: "/" })}
+            className="mt-3 w-full rounded-md border border-edge px-3 py-2 text-sm hover:border-btn"
+          >
+            Sign in with Authentik
+          </button>
+        )}
       </form>
     </div>
   );
