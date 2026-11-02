@@ -214,6 +214,7 @@ app/src/graph/worker.ts        →  multi-agent deep runs (analysis_jobs queue �
 - Login (`web/lib/auth.ts`): per-email + per-IP throttle (`web/lib/loginThrottle.ts`), constant-time unknown-email path, failures logged.
 - Untrusted text (RSS / scraped pages) enters prompts only fenced in `<news><article>` and marked untrusted (`services/news.ts`).
 - Secrets via `.env` only, never hardcoded; `DATABASE_URL` and `AUTH_SECRET` are server-side only — never expose them via `NEXT_PUBLIC_*`
+- `npm audit`: plain `npm audit fix` hits ERESOLVE (app's `@eslint/js@10` hoists against web's eslint 9) — bump vulnerable packages with targeted `npm update <pkg>` instead; never `--force` (it "fixes" by downgrading eslint/next-auth). Accepted residue: `minimatch` <11 (lint-only, eslint 9/10 chain; v3 API can't take an override).
 
 ## graphify
 
