@@ -100,6 +100,8 @@ export default function NewsList({
                   <img
                     src={imageUrl}
                     alt=""
+                    referrerPolicy="no-referrer"
+                    loading="lazy"
                     className="hidden h-20 w-28 shrink-0 rounded-md border border-edge object-cover sm:block"
                   />
                 )}

@@ -5,12 +5,12 @@ import {
 } from '../db/db'
 import { computeIndicators, toDailySeries, type Indicators } from '../ai/indicators'
 import { fetchStock } from '../providers/market'
-import { getNewsSentiment } from './news'
+import { getNewsSentiment, untrusted } from './news'
 import { callLlmWithModel, extractRecommendation, cleanForTelegram, HELD_RECOMMENDATIONS, WATCHLIST_RECOMMENDATIONS } from '../ai/llm'
-import { buildPrompt } from '../ai/prompts'
+import { ANALYSIS_SYSTEM, buildPrompt } from '../ai/prompts'
 import { sendTelegram } from '../telegram/client'
 import { ALERT_FOOTER, evaluateAlert, shouldReanalyze } from '../telegram/alerts'
-import { normalizeTicker } from '../../../lib/format'
+import { escapeHtml, normalizeTicker } from '../../../lib/format'
 import { mapPool } from '../utils/mapPool.js'
 
 type Depth = 'LIGHT' | 'FULL' | 'DEEP'
@@ -146,11 +146,15 @@ async function analyzeOneTicker(
 
   const [valuation, cls] = await Promise.all([getValuation(jk), getClassification(jk)])
   const metadata = cls
-    ? { name: cls.name ?? undefined, sector: cls.sector ?? undefined, industry: cls.sub_industry ?? cls.industry ?? undefined }
+    ? { // IDX profile text is third-party: plain, bounded, before it enters a prompt
+        name: cls.name ? untrusted(cls.name, 120) : undefined,
+        sector: cls.sector ? untrusted(cls.sector, 80) : undefined,
+        industry: (cls.sub_industry ?? cls.industry) ? untrusted((cls.sub_industry ?? cls.industry)!, 80) : undefined,
+      }
     : undefined
   const prompt = buildPrompt(snap, null, depth, newsSentiment, metadata, indicators, valuation?.summary)
   // Temperature 0: this call decides the recommendation; sampling noise caused HOLD↔MONITOR alert churn.
-  const { text: raw, model } = await callLlmWithModel(prompt, { temperature: 0 })
+  const { text: raw, model } = await callLlmWithModel(prompt, { system: ANALYSIS_SYSTEM, temperature: 0 })
   const cleanHtml = cleanForTelegram(raw)
   const recommendation = extractRecommendation(raw, avgPrice ? HELD_RECOMMENDATIONS : WATCHLIST_RECOMMENDATIONS)
 
@@ -162,7 +166,7 @@ async function analyzeOneTicker(
   // or the WIB day rolled over — repeating an unchanged verdict is noise.
   // UNKNOWN = the model skipped or garbled its REKOMENDASI line: store it, never alert on it.
   const shouldSend = !noTelegram() && alerts !== 'silent' && !alertEval.isSame && recommendation !== 'UNKNOWN'
-  const header = `<b>${jk.replace('.JK', '')}</b> — ${recommendation}\n\n`
+  const header = `<b>${escapeHtml(jk.replace('.JK', ''))}</b> —${recommendation}\n\n`
   const sent = shouldSend && await sendTelegram(header + cleanHtml + ALERT_FOOTER)
 
   await saveAnalysis(snapshotId, jk, model, raw, cleanHtml, recommendation, sent, alertEval.isSame)

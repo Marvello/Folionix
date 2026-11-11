@@ -1,6 +1,28 @@
 import 'dotenv/config'
 import nodemailer from 'nodemailer'
-import { marked } from 'marked'
+import { Marked } from 'marked'
+import { escapeHtml } from '../../../lib/format'
+
+// Markdown here includes LLM- and DB-derived text, so the HTML part must not
+// carry raw HTML, javascript:/data: links, or remote images (tracking pixels).
+const SAFE_HREF = /^(https?:|mailto:)/i
+const emailMarked = new Marked({
+  renderer: {
+    html: ({ text }) => escapeHtml(text),
+    link({ href, title, tokens }) {
+      const label = this.parser.parseInline(tokens)
+      if (!SAFE_HREF.test(href)) return label
+      const t = title ? ` title="${escapeHtml(title)}"` : ''
+      return `<a href="${escapeHtml(href)}"${t}>${label}</a>`
+    },
+    image: ({ text }) => escapeHtml(text),
+  },
+})
+
+/** Markdown → email-safe HTML. Exported for tests. */
+export async function renderEmailHtml(markdown: string): Promise<string> {
+  return emailMarked.parse(markdown)
+}
 
 // ── EMAIL (Brevo SMTP) ──────────────────────────────────────────────────────
 // Best-effort delivery: when SMTP env is not configured the send is skipped
@@ -48,7 +70,7 @@ export async function sendEmailMarkdown(
     auth: { user: cfg.user, pass: cfg.pass },
   })
 
-  const html = await marked.parse(markdown)
+  const html = await renderEmailHtml(markdown)
 
   try {
     await transporter.sendMail({

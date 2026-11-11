@@ -6,6 +6,8 @@
 
 const FETCH_TIMEOUT_MS = 8_000
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+import { fetchPublicText, readCapped } from '../utils/http'
+
 const BATCHEXECUTE_URL = 'https://news.google.com/_/DotsSplashUi/data/batchexecute'
 
 export interface ArticleMeta {
@@ -13,6 +15,11 @@ export interface ArticleMeta {
   imageUrl: string | null
 }
 
+// Publisher pages are third-party: og tags live in <head>, so read at most this
+// many (decompressed) bytes — a huge or gzip-bomb page can't exhaust memory.
+const MAX_PAGE_BYTES = 512 * 1024
+
+// Only Google's own endpoints go through here (fixed hosts, checked below).
 async function fetchText(url: string, init?: RequestInit): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -20,10 +27,20 @@ async function fetchText(url: string, init?: RequestInit): Promise<string | null
       headers: { 'User-Agent': UA, ...init?.headers },
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     })
-    if (!res.ok) return null
-    return await res.text()
+    if (!res.ok || !res.body) return null
+    return await readCapped(res.body, 4 * MAX_PAGE_BYTES)
   } catch {
     return null
+  }
+}
+
+/** RSS links must point at Google News itself before we fetch them. */
+export function isGoogleNewsLink(link: string): boolean {
+  try {
+    const u = new URL(link)
+    return u.protocol === 'https:' && u.hostname === 'news.google.com'
+  } catch {
+    return false
   }
 }
 
@@ -43,12 +60,17 @@ export function extractDecodedUrl(body: string): string | null {
 
 /** Extract og:description and og:image from a publisher page. */
 export function extractOgMeta(html: string): ArticleMeta {
+  // og tags are in <head>; never scan the body.
+  const headEnd = html.search(/<\/head>/i)
+  const head = headEnd === -1 ? html : html.slice(0, headEnd)
+  // [^<>] stops each attempt at the next tag, keeping the scan linear on hostile
+  // input ('<meta '.repeat(k) was O(N²) with [^>]+).
   const og = (prop: string): string | null => {
     const re = new RegExp(
-      `<meta[^>]+(?:property|name)=["']og:${prop}["'][^>]+content=["']([^"']+)["']|<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']og:${prop}["']`,
+      `<meta[^<>]{1,2000}?(?:property|name)=["']og:${prop}["'][^<>]{1,2000}?content=["']([^"'<>]{1,2000})["']|<meta[^<>]{1,2000}?content=["']([^"'<>]{1,2000})["'][^<>]{1,2000}?(?:property|name)=["']og:${prop}["']`,
       'i',
     )
-    const m = html.match(re)
+    const m = head.match(re)
     return m ? (m[1] ?? m[2]) : null
   }
   const description = og('description')
@@ -67,6 +89,7 @@ function decodeHtmlEntities(s: string): string {
 
 /** Resolve a news.google.com/rss/articles/… link to the publisher URL. */
 export async function resolveGoogleNewsUrl(googleUrl: string): Promise<string | null> {
+  if (!isGoogleNewsLink(googleUrl)) return null
   const page = await fetchText(googleUrl)
   if (!page) return null
   const params = extractDecodeParams(page)
@@ -96,7 +119,8 @@ export async function resolveGoogleNewsUrl(googleUrl: string): Promise<string | 
 export async function fetchGoogleArticleMeta(googleUrl: string): Promise<ArticleMeta | null> {
   const realUrl = await resolveGoogleNewsUrl(googleUrl)
   if (!realUrl) return null
-  const page = await fetchText(realUrl)
+  // The publisher URL comes out of a scraped response: public hosts only, every redirect re-checked.
+  const page = await fetchPublicText(realUrl, MAX_PAGE_BYTES, { headers: { 'User-Agent': UA }, timeoutMs: FETCH_TIMEOUT_MS })
   if (!page) return null
   const meta = extractOgMeta(page)
   return meta.description || meta.imageUrl ? meta : null

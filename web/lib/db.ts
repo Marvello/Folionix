@@ -36,3 +36,20 @@ export function getPool(): pg.Pool {
   }
   return _pool;
 }
+
+/** BEGIN … COMMIT on one client; a failed ROLLBACK destroys the client instead of re-pooling it. */
+export async function withTransaction<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  const client = await getPool().connect();
+  let broken: Error | undefined;
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    await client.query("ROLLBACK").catch((e: Error) => { broken = e; });
+    throw err;
+  } finally {
+    client.release(broken);
+  }
+}

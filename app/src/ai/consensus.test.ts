@@ -92,4 +92,10 @@ describe('enforceRecommendation', () => {
     expect(out).not.toContain('REKOMENDASI: HOLD')
     expect(out.endsWith('REKOMENDASI: CUT LOSS')).toBe(true)
   })
+
+  it('strips tag-wrapped or mid-line REKOMENDASI the model wrote', () => {
+    const out = enforceRecommendation('<b>REKOMENDASI: BUY</b>\nVerdict — REKOMENDASI: BUY', 'HOLD')
+    expect(out).not.toContain('BUY')
+    expect(out.endsWith('REKOMENDASI: HOLD')).toBe(true)
+  })
 })

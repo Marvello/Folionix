@@ -1,6 +1,6 @@
 "use server";
 
-import { getPool } from "@/lib/db";
+import { getPool, withTransaction } from "@/lib/db";
 import { auth } from "@/lib/auth";
 import { getSettingDef, validateCombination, validateSetting } from "@folionix/lib";
 
@@ -156,16 +156,21 @@ export async function insertStockTransaction(payload: {
   const ticker = vTicker(payload.ticker);
   const side = vSide(payload.side);
   const lots = vNum(payload.lots, "lots", { int: true });
-  const pool = getPool();
-  if (side === "SELL") {
-    const { rows } = await pool.query(`SELECT lots FROM portfolio_positions WHERE ticker = $1`, [ticker]);
-    const held = rows[0]?.lots ?? 0;
-    if (lots > held) throw new Error(`Cannot sell ${lots} lots; only ${held} held`);
-  }
-  await pool.query(
-    `INSERT INTO stock_transactions (ticker, side, lots, price, fee, txn_at, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [ticker, side, lots, vNum(payload.price, "price", { zero: true }), vNum(payload.fee, "fee", { zero: true }), vDate(payload.txn_at, "date"), vText(payload.notes)],
-  );
+  const values = [ticker, side, lots, vNum(payload.price, "price", { zero: true }), vNum(payload.fee, "fee", { zero: true }), vDate(payload.txn_at, "date"), vText(payload.notes)];
+  await withTransaction(async (client) => {
+    if (side === "SELL") {
+      // Same per-ticker lock the position-recompute trigger takes: a concurrent
+      // trade waits here, so the held-lots check and the insert can't interleave.
+      await client.query(`SELECT pg_advisory_xact_lock(hashtext('recompute_stock_position:' || $1))`, [ticker]);
+      const { rows } = await client.query(`SELECT lots FROM portfolio_positions WHERE ticker = $1`, [ticker]);
+      const held = rows[0]?.lots ?? 0;
+      if (lots > held) throw new Error(`Cannot sell ${lots} lots; only ${held} held`);
+    }
+    await client.query(
+      `INSERT INTO stock_transactions (ticker, side, lots, price, fee, txn_at, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      values,
+    );
+  });
 }
 
 export async function insertStockDividend(payload: {

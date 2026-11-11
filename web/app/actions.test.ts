@@ -2,7 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const query = vi.fn();
 const auth = vi.fn();
-vi.mock("@/lib/db", () => ({ getPool: () => ({ query }) }));
+const txQuery = vi.fn();
+vi.mock("@/lib/db", () => ({
+  getPool: () => ({ query }),
+  withTransaction: async (fn: (c: { query: typeof txQuery }) => unknown) => fn({ query: txQuery }),
+}));
 vi.mock("@/lib/auth", () => ({ auth: () => auth() }));
 
 const { insertStockTransaction, fetchFilteredNews, deleteAccountCharge, promotePeer, saveSetting, resetSetting } = await import("./actions");
@@ -12,6 +16,7 @@ const txn = { ticker: "BBCA.JK", side: "BUY", lots: 1, price: 9000, fee: 0, txn_
 describe("server actions", () => {
   beforeEach(() => {
     query.mockReset().mockResolvedValue({ rows: [] });
+    txQuery.mockReset().mockResolvedValue({ rows: [] });
     auth.mockReset().mockResolvedValue({ user: { email: "a@b.c" } });
   });
 
@@ -28,12 +33,21 @@ describe("server actions", () => {
     await expect(insertStockTransaction({ ...txn, side: "GIFT" })).rejects.toThrow("Invalid side");
     await expect(insertStockTransaction({ ...txn, ticker: "BBCA" })).rejects.toThrow("Invalid ticker");
     expect(query).not.toHaveBeenCalled();
+    expect(txQuery).not.toHaveBeenCalled();
   });
 
-  it("refuses to oversell", async () => {
-    query.mockResolvedValueOnce({ rows: [{ lots: 2 }] });
+  it("refuses to oversell, checking under the per-ticker lock", async () => {
+    txQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ lots: 2 }] });
     await expect(insertStockTransaction({ ...txn, side: "SELL", lots: 3 })).rejects.toThrow("only 2 held");
-    expect(query).toHaveBeenCalledTimes(1);
+    expect(txQuery.mock.calls[0][0]).toMatch(/pg_advisory_xact_lock\(hashtext\('recompute_stock_position:' \|\| \$1\)\)/);
+    expect(txQuery).toHaveBeenCalledTimes(2); // lock + check, no insert
+  });
+
+  it("sells within holdings: lock, check, insert in one transaction", async () => {
+    txQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ lots: 5 }] });
+    await insertStockTransaction({ ...txn, side: "SELL", lots: 3 });
+    expect(txQuery).toHaveBeenCalledTimes(3);
+    expect(txQuery.mock.calls[2][0]).toMatch(/INSERT INTO stock_transactions/);
   });
 
   it("promotes only peer rows, behind the session + ticker guards", async () => {
@@ -55,6 +69,7 @@ describe("server actions", () => {
 describe("settings actions", () => {
   beforeEach(() => {
     query.mockReset().mockResolvedValue({ rows: [] });
+    txQuery.mockReset().mockResolvedValue({ rows: [] });
     auth.mockReset().mockResolvedValue({ user: { email: "me@x.com" } });
   });
 

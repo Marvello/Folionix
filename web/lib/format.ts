@@ -174,6 +174,11 @@ const decodeEntities = (s: string): string =>
     .replace(/&#0?39;/g, "'")
     .replace(/&nbsp;/g, " ");
 
+/** Stored third-party URL → href only if http(s); never javascript:/data:. */
+export function safeHref(url: string | null | undefined): string | undefined {
+  return url && /^https?:\/\//i.test(url) ? url : undefined;
+}
+
 /**
  * RSS summaries often embed a leading <img> tag and HTML entities. Pull out
  * the first http(s) image URL and return the plain-text remainder.

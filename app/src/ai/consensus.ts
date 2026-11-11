@@ -100,7 +100,7 @@ export function buildConsensusPrompt(
 export function enforceRecommendation(raw: string, decidedRec: string): string {
   const stripped = raw
     .split('\n')
-    .filter(line => !/^\s*REKOMENDASI\b/i.test(line))
+    .filter(line => !/\bREKOMENDASI\b/i.test(line)) // incl. tag-wrapped / mid-line ones
     .join('\n')
     .trimEnd()
   return `${stripped}\n\nREKOMENDASI: ${decidedRec}`

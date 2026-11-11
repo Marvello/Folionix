@@ -1,26 +1,47 @@
-import { describe, it, expect } from "vitest";
-import { findOidcUser } from "./oidcUser";
+import { describe, it, expect, beforeEach } from "vitest";
+import { findOidcUser, type OidcUserStore } from "./oidcUser";
 
-const rows = new Map([["owner@example.com", { id: 7, email: "Owner@example.com", name: "Owner" }]]);
-const find = async (email: string) => rows.get(email);
+type Row = { id: number; email: string; name: string; oidc_subject: string | null };
+let rows: Row[];
+const store: OidcUserStore = {
+  findBySubject: async (s) => rows.find((r) => r.oidc_subject === s),
+  findByEmail: async (e) => rows.find((r) => r.email.toLowerCase() === e),
+  bindSubject: async (id, s) => {
+    const r = rows.find((x) => x.id === id && x.oidc_subject === null);
+    if (r) r.oidc_subject = s;
+    return Boolean(r);
+  },
+};
+const ISS = "https://auth.example.com/application/o/folionix/";
+const owner = { id: "7", email: "Owner@example.com", name: "Owner" };
+
+beforeEach(() => {
+  rows = [{ id: 7, email: "Owner@example.com", name: "Owner", oidc_subject: null }];
+});
 
 describe("findOidcUser", () => {
-  it("maps a verified, known email to the users row (case-insensitive)", async () => {
-    expect(await findOidcUser({ email: " OWNER@example.com ", email_verified: true }, find)).toEqual({
-      id: "7",
-      email: "Owner@example.com",
-      name: "Owner",
-    });
+  it("binds a verified, known email on first login, then matches by subject", async () => {
+    expect(await findOidcUser({ iss: ISS, sub: "u1", email: " OWNER@example.com ", email_verified: true }, store)).toEqual(owner);
+    expect(rows[0].oidc_subject).toBe(`${ISS}#u1`);
+    // Later logins match on (iss, sub) — the email no longer matters.
+    expect(await findOidcUser({ iss: ISS, sub: "u1", email: "changed@example.com", email_verified: false }, store)).toEqual(owner);
+  });
+
+  it("refuses a different subject presenting the bound email", async () => {
+    rows[0].oidc_subject = `${ISS}#u1`;
+    expect(await findOidcUser({ iss: ISS, sub: "attacker", email: "owner@example.com", email_verified: true }, store)).toBeNull();
   });
 
   it("refuses unknown emails — SSO never creates accounts", async () => {
-    expect(await findOidcUser({ email: "stranger@example.com", email_verified: true }, find)).toBeNull();
+    expect(await findOidcUser({ iss: ISS, sub: "u2", email: "stranger@example.com", email_verified: true }, store)).toBeNull();
   });
 
-  it("refuses unverified or missing emails", async () => {
-    expect(await findOidcUser({ email: "owner@example.com", email_verified: false }, find)).toBeNull();
-    expect(await findOidcUser({ email: "owner@example.com", email_verified: "true" }, find)).toBeNull();
-    expect(await findOidcUser({ email_verified: true }, find)).toBeNull();
-    expect(await findOidcUser(undefined, find)).toBeNull();
+  it("refuses unverified emails, missing claims, or a lost bind race", async () => {
+    expect(await findOidcUser({ iss: ISS, sub: "u1", email: "owner@example.com", email_verified: false }, store)).toBeNull();
+    expect(await findOidcUser({ iss: ISS, sub: "u1", email: "owner@example.com", email_verified: "true" }, store)).toBeNull();
+    expect(await findOidcUser({ sub: "u1", email: "owner@example.com", email_verified: true }, store)).toBeNull();
+    expect(await findOidcUser(undefined, store)).toBeNull();
+    const racing = { ...store, bindSubject: async () => false };
+    expect(await findOidcUser({ iss: ISS, sub: "u1", email: "owner@example.com", email_verified: true }, racing)).toBeNull();
   });
 });

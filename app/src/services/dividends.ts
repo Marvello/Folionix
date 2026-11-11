@@ -2,7 +2,7 @@ import { loadPortfolio, upsertDividendSchedule, getDividendScheduleForExDate, ge
 import { fetchDividendSchedule } from '../providers/idx'
 import { fetchDividendAmount } from '../providers/market'
 import { sendTelegram } from '../telegram/client'
-import { displayTicker, fmtIdr, wibDateOffset } from '../../../lib/format'
+import { displayTicker, escapeHtml, fmtIdr, wibDateOffset } from '../../../lib/format'
 
 // ── SYNC (IDX dates + yahoo amount backfill) ──
 
@@ -52,12 +52,12 @@ export async function syncDividendSchedules(): Promise<void> {
 
 function amountLine(r: { ticker: string; amount_per_share: number | null; amount_estimated: boolean }, lots: number): string {
   if (r.amount_per_share == null) {
-    return `⚠️ <b>${displayTicker(r.ticker)}</b> — amount unavailable, please verify & update`
+    return `⚠️ <b>${escapeHtml(displayTicker(r.ticker))}</b> — amount unavailable, please verify & update`
   }
   const total = fmtIdr(r.amount_per_share * lots * 100)
   return r.amount_estimated
-    ? `<b>${displayTicker(r.ticker)}</b> · ~${total} (annual est — verify)`
-    : `<b>${displayTicker(r.ticker)}</b> · ${total}`
+    ? `<b>${escapeHtml(displayTicker(r.ticker))}</b> · ~${total} (annual est — verify)`
+    : `<b>${escapeHtml(displayTicker(r.ticker))}</b> · ${total}`
 }
 
 export async function sendDividendReminders(): Promise<void> {

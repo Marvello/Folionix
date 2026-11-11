@@ -51,10 +51,7 @@ beforeEach(() => {
 describe('fetchCouponSchedule', () => {
   it('returns schedule array for government bond', async () => {
     process.env.KSEI_BASE_URL = 'https://web.ksei.co.id/services/registered-securities'
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      text: async () => twoRowsHtml,
-    } as unknown as Response)
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response(twoRowsHtml))
 
     const { fetchCouponSchedule } = await import('./ksei.js')
     const schedule = await fetchCouponSchedule('SR020')
@@ -69,10 +66,7 @@ describe('fetchCouponSchedule', () => {
 
   it('uses government-bonds URL for SR series', async () => {
     process.env.KSEI_BASE_URL = 'https://web.ksei.co.id/services/registered-securities'
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      text: async () => emptyTbodyHtml,
-    } as unknown as Response)
+    const mockFetch = vi.fn().mockResolvedValueOnce(new Response(emptyTbodyHtml))
     global.fetch = mockFetch
 
     const { fetchCouponSchedule } = await import('./ksei.js')
@@ -85,10 +79,7 @@ describe('fetchCouponSchedule', () => {
 
   it('uses corporate-bonds URL for CORP series', async () => {
     process.env.KSEI_BASE_URL = 'https://web.ksei.co.id/services/registered-securities'
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      text: async () => emptyTbodyHtml,
-    } as unknown as Response)
+    const mockFetch = vi.fn().mockResolvedValueOnce(new Response(emptyTbodyHtml))
     global.fetch = mockFetch
 
     const { fetchCouponSchedule } = await import('./ksei.js')
@@ -110,10 +101,7 @@ describe('fetchCouponSchedule', () => {
   })
 
   it('returns empty array when no tbody found', async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      text: async () => '<html><body><table></table></body></html>',
-    } as unknown as Response)
+    global.fetch = vi.fn().mockResolvedValueOnce(new Response('<html><body><table></table></body></html>'))
 
     const { fetchCouponSchedule } = await import('./ksei.js')
     const schedule = await fetchCouponSchedule('SR020')

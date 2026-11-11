@@ -97,7 +97,8 @@ const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? 
 /** Pure mapping of one GetCompanyProfiles row. Exported for tests. */
 export function mapClassification(r: Record<string, unknown>): Classification | null {
   const kode = str(r.KodeEmiten)
-  if (!kode) return null
+  // IDX codes are 4 chars; anything else is junk we must not store as a ticker.
+  if (!kode || !/^[A-Z0-9]{1,7}$/.test(kode)) return null
   return {
     ticker: normalizeTicker(kode),
     name: str(r.NamaEmiten),

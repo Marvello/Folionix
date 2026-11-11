@@ -120,7 +120,7 @@ export async function fetchNewsForTicker(ticker: string, depth: Depth): Promise<
 const ARTICLE_MAX_CHARS = 400
 
 /** Untrusted third-party text → plain, bounded, delimiter-safe text for a prompt. */
-function untrusted(s: string, max: number): string {
+export function untrusted(s: string, max: number): string {
   return s.replace(/<[^>]*>/g, ' ').replace(/[<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max)
 }
 

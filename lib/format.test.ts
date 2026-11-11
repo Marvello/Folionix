@@ -98,6 +98,7 @@ describe('sanitizeHtml', () => {
 describe('escapeHtml', () => {
   it('escapes and keeps existing entities', () => {
     expect(escapeHtml('a<b>&amp;&c')).toBe('a&lt;b&gt;&amp;&amp;c')
+    expect(escapeHtml('x" onclick="y')).toBe('x&quot; onclick=&quot;y')
   })
 })
 

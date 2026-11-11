@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 # docker/Dockerfile.app
-FROM node:24-alpine AS deps
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS deps
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY lib/ ./lib/
@@ -10,7 +10,7 @@ COPY app/package.json ./app/
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --omit=dev -w app && mkdir -p app/node_modules
 
-FROM node:24-alpine AS builder
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS builder
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY lib/ ./lib/
@@ -20,7 +20,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY app/ ./app/
 RUN cd app && node build.mjs
 
-FROM node:24-alpine AS runner
+FROM node:24-alpine@sha256:a34ab6d7f6f4813f4d0c5469d74685604b962fbdbf5793a7bc7b4998ecb867c8 AS runner
 ARG GIT_COMMIT=dev
 ENV GIT_COMMIT=$GIT_COMMIT
 WORKDIR /app

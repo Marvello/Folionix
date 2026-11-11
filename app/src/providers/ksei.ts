@@ -22,6 +22,11 @@
  */
 import 'dotenv/config'
 import { withRetry } from '../utils/retry'
+import { isSafePathSegment, readCapped, readCappedBytes } from '../utils/http'
+
+// KSEI pages are a few hundred KB, registration PDFs a few MB; cap well above that.
+const MAX_HTML_BYTES = 5 * 1024 * 1024
+const MAX_PDF_BYTES = 20 * 1024 * 1024
 
 // ── CONSTANTS ─────────────────────────────────────────────────────────────────
 
@@ -79,6 +84,7 @@ function seriesKind(series: string): 'government-bonds' | 'corporate-bonds' {
 }
 
 function buildUrl(series: string): string {
+  if (!isSafePathSegment(series)) throw new Error(`invalid series code: ${JSON.stringify(series)}`)
   const base = (process.env.KSEI_BASE_URL ?? DEFAULT_BASE).replace(/\/$/, '')
   const kind = seriesKind(series)
   return `${base}/${kind}/lc/${encodeURIComponent(series)}`
@@ -155,15 +161,15 @@ function parseKseiHtml(html: string): CouponScheduleEntry[] {
  * @returns Array of schedule entries, or empty array on any error.
  */
 export async function fetchCouponSchedule(series: string): Promise<CouponScheduleEntry[]> {
-  const url = buildUrl(series)
   try {
+    const url = buildUrl(series)
     return await withRetry(async () => {
       const res = await fetch(url, {
         signal: AbortSignal.timeout(20_000),
         headers: FETCH_HEADERS,
       })
-      if (!res.ok) throw new Error(`KSEI ${res.status}`)
-      const html = await res.text()
+      if (!res.ok || !res.body) throw new Error(`KSEI ${res.status}`)
+      const html = await readCapped(res.body, MAX_HTML_BYTES)
       return parseKseiHtml(html)
     }, 3, 1000)
   } catch {
@@ -183,6 +189,15 @@ export async function fetchCouponSchedule(series: string): Promise<CouponSchedul
 
 const NEWSEC_HOST = 'https://web.ksei.co.id'
 const NEWSEC_URL = `${NEWSEC_HOST}/publications/new-securities-registration`
+
+export function isKseiUrl(link: string): boolean {
+  try {
+    const u = new URL(link)
+    return u.protocol === 'https:' && (u.hostname === 'ksei.co.id' || u.hostname.endsWith('.ksei.co.id'))
+  } catch {
+    return false
+  }
+}
 
 const ID_MONTHS: Record<string, string> = {
   januari: '01', februari: '02', maret: '03', april: '04', mei: '05', juni: '06',
@@ -250,8 +265,8 @@ export async function fetchNewSecurities(): Promise<Array<NewSecurityRef & { kin
   try {
     return await withRetry(async () => {
       const res = await fetch(NEWSEC_URL, { signal: AbortSignal.timeout(20_000), headers: FETCH_HEADERS })
-      if (!res.ok) throw new Error(`KSEI new-sec ${res.status}`)
-      const html = await res.text()
+      if (!res.ok || !res.body) throw new Error(`KSEI new-sec ${res.status}`)
+      const html = await readCapped(res.body, MAX_HTML_BYTES)
       return parseNewSecurities(html)
         .map((r) => ({ ...r, kind: classifyBondTitle(r.title) }))
         .filter((r): r is NewSecurityRef & { kind: NewBondKind } => r.kind != null)
@@ -263,12 +278,13 @@ export async function fetchNewSecurities(): Promise<Array<NewSecurityRef & { kin
 
 /** Max tranche coupon (% p.a) from a registration PDF, or null if unreadable. */
 export async function fetchCoupon(pdfUrl: string): Promise<number | null> {
-  if (!pdfUrl) return null
+  // The PDF link is scraped from KSEI's page: only fetch it from KSEI itself.
+  if (!pdfUrl || !isKseiUrl(pdfUrl)) return null
   try {
     return await withRetry(async () => {
       const res = await fetch(pdfUrl, { signal: AbortSignal.timeout(30_000), headers: FETCH_HEADERS })
-      if (!res.ok) throw new Error(`KSEI pdf ${res.status}`)
-      const buf = new Uint8Array(await res.arrayBuffer())
+      if (!res.ok || !res.body) throw new Error(`KSEI pdf ${res.status}`)
+      const buf = await readCappedBytes(res.body, MAX_PDF_BYTES)
       const { extractText } = await import('unpdf')
       const { text } = await extractText(buf, { mergePages: true })
       const rates = parseCouponRates(Array.isArray(text) ? text.join('\n') : text)

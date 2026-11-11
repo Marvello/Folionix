@@ -1,0 +1,18 @@
+# Keeps the SHA-pinned actions and digest-pinned base images current.
+# Pins block a silently re-pointed tag; these PRs are how updates still arrive.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: docker
+    directory: /docker
+    schedule: { interval: weekly }
+    ignore:
+      # Stay on the Node 24 line; majors are a deliberate upgrade.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+    groups:
+      base-images: { patterns: ["*"] }

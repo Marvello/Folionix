@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.7
-FROM node:24-slim AS builder
+FROM node:24-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS builder
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY lib/ ./lib/
@@ -10,7 +10,7 @@ COPY web/ ./web/
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN cd web && npm run build
 
-FROM node:24-slim AS runner
+FROM node:24-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1

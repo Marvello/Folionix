@@ -127,7 +127,7 @@ services:
       - AIREVIEW_API_TOKEN=${AIREVIEW_API_TOKEN:-}   # unset = /api/weekly-reviews/latest disabled (503)
       - NEXT_PUBLIC_APP_VERSION=${FOLIONIX_TAG:-latest}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"   # local only; publish via a tunnel/reverse proxy
     healthcheck:   # image has no curl/wget; /api/health also checks the DB
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/api/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
       interval: 30s

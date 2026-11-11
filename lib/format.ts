@@ -81,6 +81,7 @@ export function escapeHtml(s: string): string {
     .replace(/&(?!(?:amp|lt|gt|quot|#\d+|#x[0-9a-f]+);)/gi, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;') // safe inside double-quoted attributes too
 }
 
 /**

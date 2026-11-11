@@ -8,6 +8,7 @@
  */
 import 'dotenv/config'
 import { withRetry } from '../utils/retry'
+import { isSafePathSegment } from '../utils/http'
 
 // ── GOLD ──────────────────────────────────────────────────────────────────────
 
@@ -302,6 +303,7 @@ interface FundDetailResponse {
  * failure — holdings are best-effort enrichment, never fatal to a refresh.
  */
 export async function fetchFundHoldings(slug: string): Promise<FundHoldingRecord[]> {
+  if (!isSafePathSegment(slug)) return []
   const headers: Record<string, string> = {
     'accept': '*/*',
     'referer': 'https://invest.cermati.com/reksadana/semua',

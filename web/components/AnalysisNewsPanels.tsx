@@ -1,7 +1,7 @@
 "use client";
 
 import { sanitizeHtml } from "@folionix/lib";
-import { fmtWib, fmtWibDate } from "@/lib/format";
+import { fmtWib, fmtWibDate, safeHref } from "@/lib/format";
 import type { Analysis, NewsRow } from "@/lib/types";
 import RecommendationBadge from "@/components/RecommendationBadge";
 import Pager from "@/components/Pager";
@@ -51,7 +51,7 @@ export default function AnalysisNewsPanels({ analyses, news }: { analyses: Analy
             <ul className="space-y-2">
               {nw.pageItems.map((n) => (
                 <li key={n.id} className="rounded-md border border-edge bg-component p-3">
-                  <a href={n.url} target="_blank" rel="noreferrer" className="text-sm text-tsecondary hover:text-tprimary">
+                  <a href={safeHref(n.url)} target="_blank" rel="noreferrer" className="text-sm text-tsecondary hover:text-tprimary">
                     {n.headline}
                   </a>
                   <div className="mt-0.5 text-xs text-tdim">

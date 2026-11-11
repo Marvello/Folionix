@@ -21,6 +21,17 @@ export function recordFailure(key: string, now = Date.now()): void {
   if (entries.size > 10_000) entries.delete(entries.keys().next().value!); // bound memory
 }
 
+/**
+ * Check every key and, if none is locked, count this attempt as a failure up
+ * front. Synchronous on purpose: concurrent logins can't all slip past the
+ * check while the first ones are still awaiting bcrypt. Success clears it.
+ */
+export function tryAttempt(keys: string[], now = Date.now()): boolean {
+  if (keys.some((k) => isLocked(k, now))) return false;
+  keys.forEach((k) => recordFailure(k, now));
+  return true;
+}
+
 export function clearFailures(key: string): void {
   entries.delete(key);
 }

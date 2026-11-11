@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowLeft, ExternalLink } from "lucide-react";
 import { getPool } from "@/lib/db";
-import { displayTicker, fmtWib, fmtAgo, fmtSigned, dirGlyph, parseSummary, newsCutoffIso } from "@/lib/format";
+import { displayTicker, fmtWib, fmtAgo, fmtSigned, dirGlyph, parseSummary, newsCutoffIso, safeHref } from "@/lib/format";
 import type { NewsRow, Position, WatchRow } from "@/lib/types";
 import NewsList from "@/components/NewsList";
 
@@ -57,6 +57,7 @@ export default async function NewsPage({
           <img
             src={summary.imageUrl}
             alt=""
+            referrerPolicy="no-referrer"
             className="max-h-[28rem] w-full rounded-lg border border-edge object-cover"
           />
         )}
@@ -88,9 +89,9 @@ export default async function NewsPage({
           </section>
         )}
 
-        {n.url && (
+        {safeHref(n.url) && (
           <a
-            href={n.url}
+            href={safeHref(n.url)}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-accent hover:underline"

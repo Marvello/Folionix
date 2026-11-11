@@ -16,10 +16,10 @@ import {
   aggregateSignals, mapToRecommendation, buildConsensusPrompt,
   enforceRecommendation, type PersonaVote,
 } from '../ai/consensus'
-import { callLlmWithModel, cleanForTelegram, extractRecommendation, HELD_RECOMMENDATIONS, WATCHLIST_RECOMMENDATIONS } from '../ai/llm'
+import { callLlmWithModel, cleanForTelegram } from '../ai/llm'
 import { sendTelegram } from '../telegram/client'
 import { ALERT_FOOTER, evaluateAlert } from '../telegram/alerts'
-import { normalizeTicker } from '../../../lib/format'
+import { escapeHtml, normalizeTicker } from '../../../lib/format'
 import type { AnalysisJobRow } from '../../../lib/types'
 
 // ── DEEP RUN (multi-agent) ──────────────────────────────────────────────────
@@ -150,7 +150,8 @@ export async function handleConsensusJob(job: AnalysisJobRow): Promise<Record<st
   const { text: rendered, model } = await callLlmWithModel(user, { system })
   const raw = enforceRecommendation(rendered, decidedRec)
   const cleanHtml = cleanForTelegram(raw)
-  const recommendation = extractRecommendation(raw, payload.held ? HELD_RECOMMENDATIONS : WATCHLIST_RECOMMENDATIONS)
+  // The verdict is decided in code; the model only writes prose around it.
+  const recommendation = decidedRec
 
   const alertEval = evaluateAlert(await getLastAlertedAnalysis(job.ticker), recommendation, new Date())
   // Deep runs are signal-triggered, but a repeat of the same verdict on the
@@ -162,7 +163,7 @@ export async function handleConsensusJob(job: AnalysisJobRow): Promise<Record<st
     payload.snapshot_id, job.ticker, `consensus:${model}`,
     raw, cleanHtml, recommendation, false, alertEval.isSame,
   )
-  const header = `<b>${job.ticker.replace('.JK', '')}</b> — ${recommendation} (${voteSplit(votes)})\n\n`
+  const header = `<b>${escapeHtml(job.ticker.replace('.JK', ''))}</b> —${recommendation} (${voteSplit(votes)})\n\n`
   if (process.env.SEND_TELEGRAM !== 'false' && !alertEval.isSame && await sendTelegram(header + cleanHtml + ALERT_FOOTER)) {
     await markAnalysisSent(analysisId)
   }

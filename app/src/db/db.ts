@@ -706,6 +706,8 @@ export async function saveNewsArticles(
   source: string,
   articles: Array<{ headline: string; url: string; publishedAt?: string; summary?: string }>,
 ): Promise<void> {
+  // url is rendered as a link on the dashboard: http(s) only, never javascript:/data:.
+  articles = articles.filter(a => /^https?:\/\//i.test(a.url))
   if (articles.length === 0) return
   // One statement per call; ON CONFLICT DO NOTHING also absorbs repeats within the batch.
   const rows = articles.map(a => ({

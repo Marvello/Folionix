@@ -51,7 +51,8 @@ export async function startBot(): Promise<void> {
   const bot = new Bot(token)
 
   function isAllowed(ctx: Context): boolean {
-    return String(ctx.chat?.id) === ALLOWED_CHAT_ID
+    // Private chat only: in a group, every member could mutate the portfolio.
+    return ctx.chat?.type === 'private' && String(ctx.chat.id) === ALLOWED_CHAT_ID
   }
 
   function guard(handler: (ctx: Context, args?: string[]) => Promise<any>) {
@@ -91,7 +92,7 @@ bot.command('status', guard(async (ctx) => {
     return
   }
   const lines = positions.map(p =>
-    `<b>${displayTicker(p.ticker)}</b> — ${p.lots} lots @ ${fmtIdr(p.avg_price)}`
+    `<b>${escapeHtml(displayTicker(p.ticker))}</b> — ${p.lots} lots @ ${fmtIdr(p.avg_price)}`
   )
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
@@ -207,7 +208,7 @@ bot.command('wlist', guard(async (ctx) => {
     await ctx.reply('Watchlist is empty.')
     return
   }
-  const lines = all.map(w => `${w.kind === 'ai_suggested' ? '🤖' : '👤'} <b>${displayTicker(w.ticker)}</b>${w.notes ? ' — ' + escapeHtml(w.notes) : ''}`)
+  const lines = all.map(w => `${w.kind === 'ai_suggested' ? '🤖' : '👤'} <b>${escapeHtml(displayTicker(w.ticker))}</b>${w.notes ? ' — ' + escapeHtml(w.notes) : ''}`)
   await ctx.reply(lines.join('\n'), { parse_mode: 'HTML' })
 }))
 
